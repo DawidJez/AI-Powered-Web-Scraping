@@ -11,6 +11,9 @@ def main():
     finder = ProductFinder(page_data["html"])
     row = finder.find_by_mpn("TMCS1170")
     data = finder.extract_row_data(row)
+    #data = finder.find_pdf("TMCS1170")
+    pdf_path = finder.download_pdf("TMCS1170", output="./data/datasheets")
+    print(pdf_path)
     print(data)
 
 
