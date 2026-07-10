@@ -1,2 +1,3 @@
 firecrawl_client.py
 beautifulsoup4
+google-genai

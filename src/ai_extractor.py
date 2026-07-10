@@ -1,0 +1,92 @@
+from google import genai
+from google.genai import types
+import os
+import json
+from bs4 import BeautifulSoup
+
+class AIExtractor:
+    def __init__(self, api_key: str | None = None):
+        self.client = genai.Client(api_key=api_key or os.getenv("GEMINI_API_KEY"))
+
+    def _clean_html(self, html: str):
+        #html cleaning
+        soup = BeautifulSoup(html, "html.parser")
+
+        for tag in soup(["script", "style", "svg", "noscript"]):
+            tag.decompose()
+        
+        return str(soup)
+    
+    def _chunk_segmentation(self, load: str, chunk_size: int, overlap: int = 2000) -> list[str]:
+        chunks = []
+        start = 0
+
+        while start < len(load):
+            end = start + chunk_size
+            chunks.append(load[start:end])
+            start = end - overlap # overlap needed if record would be cut in half during chunking
+        
+        return chunks
+    
+    def _deduplicate(self, records: list[dict]) -> list[dict]:
+        seen = set()
+        unique = []
+
+        for r in records:
+            key = json.dumps(r, sort_keys=True)
+            if key not in seen:
+                seen.add(key)
+                unique.append(r)
+        return unique
+
+    def _single_extract(self, content: str, user_prompt: str):
+        system_instruction = ( """
+            # Role
+            You are an assistant specialized in extracting structured data from scraped web pages.
+            # Task
+            You will receive the raw HTML content of a web page together with a description of the information requested by the user.
+            Find **ALL** matching elements or records on the page. Do not stop after the first match and do not omit any valid results.
+            Return the result as a JSON array, where each object represents one extracted record. The object keys must match the fields requested by the user.
+            If the user requests a link (for example, a PDF, image, or product page), always return the full absolute URL.
+            If a requested field cannot be found for a particular record, set its value to `null`. Never guess or invent missing information.
+            Extract information only from the provided HTML content.
+            # Response Format
+            Return **only** valid JSON.
+            Do not include explanations, comments, Markdown formatting, or any additional text.
+            If no matching records are found, return an empty JSON array:
+            []
+        """)
+
+        response = self.client.models.generate_content(
+            model="gemini-flash-latest",
+            contents=[f"Searching for: {user_prompt}\n\nContent:\n{content}"],
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                response_mime_type="application/json"
+            )
+        )
+
+        try:
+            return json.loads(response.text)
+        except json.JSONDecodeError:
+            print(f"DEBUG: nie udało się sparsować odpowiedzi: {response.text[:300]}")
+            return []
+        
+    def extract(self, content: str, user_prompt: str, chunk_size: int = 150_000) -> list:
+        content = self._clean_html(content)
+        print(f"DEBUG: cleaned content length = {len(content)}")
+
+        if len(content) < chunk_size:
+            return self._single_extract(content, user_prompt)
+        
+        chunks = self._chunk_segmentation(content, chunk_size)
+        print(f"DEBUG: split into {len(chunks)} chunks")
+
+        all_records = []
+
+        for i, chunk in enumerate(chunks):
+            print(f"DEBUG: processing chunk {i+1}/{len(chunks)} ({len(chunk)} chars)")
+            records = self._single_extract(chunk, user_prompt)
+            all_records.extend(records)
+
+        return self._deduplicate(all_records)
