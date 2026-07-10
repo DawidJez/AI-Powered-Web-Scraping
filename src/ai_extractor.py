@@ -1,8 +1,10 @@
 from google import genai
 from google.genai import types
+from google.genai import errors
 import os
 import json
 from bs4 import BeautifulSoup
+import time
 
 class AIExtractor:
     def __init__(self, api_key: str | None = None):
@@ -39,7 +41,7 @@ class AIExtractor:
                 unique.append(r)
         return unique
 
-    def _single_extract(self, content: str, user_prompt: str):
+    def _single_extract(self, content: str, user_prompt: str, max_retries: int = 3):
         system_instruction = ( """
             # Role
             You are an assistant specialized in extracting structured data from scraped web pages.
@@ -54,9 +56,32 @@ class AIExtractor:
             Return **only** valid JSON.
             Do not include explanations, comments, Markdown formatting, or any additional text.
             If no matching records are found, return an empty JSON array:
-            []
+            []s
         """)
 
+        # it is told that free gemini api version is more susceptible for server errors
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.client.models.generate_content(
+                    model="gemini-flash-latest",
+                    contents=[f"Searching for: {user_prompt}\n\nContent:\n{content}"],
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json"
+                    )
+                )
+                break  # ssuccess
+            
+            except errors.ServerError as e:
+                wait = 2 ** attempt  # 2s, 4s, 8s...
+                print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} za {wait}s")
+
+                if attempt == max_retries:
+                    print("DEBUG: wyczerpano próby, zwracam pustą listę dla tego chunka")
+                    return []
+                
+                time.sleep(wait)
+            
         response = self.client.models.generate_content(
             model="gemini-flash-latest",
             contents=[f"Searching for: {user_prompt}\n\nContent:\n{content}"],

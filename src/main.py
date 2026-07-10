@@ -32,11 +32,26 @@ def main():
 
     extractor = AIExtractor()
     records = extractor.extract(
-        page_data["html"], 
+        page_data["html"],
         f"""
-            Extract the following fields for each matching product:
+            Find the product whose MPN (product number) is exactly "{product_number}".
+            Ignore all other products on the page.
 
-            - MPN (Product number: {product_number})
+            This product may appear more than once in the page's underlying structure
+            (e.g. once as a collapsed/summary/group entry that lacks real data,
+            and once as the actual detailed row with the real field values).
+            These are NOT separate products - they are duplicate renderings of the same one.
+
+            In that case, identify which occurrence is the real, data-bearing entry
+            (the one where most of the requested fields below have actual non-null values)
+            and return ONLY that one. Discard occurrences that are mostly empty/null -
+            those are structural placeholders, not real product data.
+
+            Do NOT merge fields from multiple occurrences into one object.
+            Do NOT guess or fabricate values for missing fields.
+
+            For this one product, extract the following fields:
+            - MPN
             - Product page URL
             - Product image URL
             - Subcategory
@@ -52,7 +67,8 @@ def main():
             - Full URL of the PDF datasheet
             - Full URL of the HTML datasheet
 
-            Return one JSON object per product. If a field is not available, set its value to null. Always return absolute URLs.
+            Return a JSON array with exactly ONE object for this product,
+            or an empty array [] if the MPN is not found on the page at all.
         """
     )
     print(records)
