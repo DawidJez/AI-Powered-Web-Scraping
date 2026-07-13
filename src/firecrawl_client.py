@@ -33,7 +33,7 @@ class FirecrawlClient:
             "metadata": result.metadata.model_dump() if result.metadata else None,
         }                            # dict type data
     
-    def fetch_all_pages(self, url: str, id_pattern: str, max_pages: int = 20) -> list[str]:
+    def fetch_all_pages(self, url: str, id_pattern: str, max_pages: int = 20) -> list[dict[str, str]]:
         # for pagination, we will fetch multiple pages by clicking "Next" button and collecting HTML content
         all_pages = []
         seen_ids = set()
@@ -74,3 +74,20 @@ class FirecrawlClient:
             )
 
         return all_pages
+
+    def merge_pages(self, pages: list[dict[str, str]]) -> dict[str, str]:
+        # Merge multiple paginated page results into a single markdown/html document.
+        if not pages:
+            return {"markdown": "", "html": ""}
+
+        merged_markdown = "\n\n".join(
+            page.get("markdown", "").strip() for page in pages if page.get("markdown")
+        )
+        merged_html = "\n".join(
+            page.get("html", "").strip() for page in pages if page.get("html")
+        )
+
+        return {
+            "markdown": merged_markdown,
+            "html": merged_html,
+        }
