@@ -5,6 +5,7 @@ import os
 import json
 from bs4 import BeautifulSoup
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class AIExtractor:
     def __init__(self, api_key: str | None = None):
@@ -70,6 +71,11 @@ class AIExtractor:
                         response_mime_type="application/json"
                     )
                 )
+                usage = response.usage_metadata
+                # debug debug
+                print(f"Prompt tokens : {usage.prompt_token_count}")
+                print(f"Output tokens : {usage.candidates_token_count}")
+                print(f"Total tokens  : {usage.total_token_count}")
                 break  # ssuccess
             
             except errors.ServerError as e:
@@ -82,22 +88,13 @@ class AIExtractor:
                 
                 time.sleep(wait)
             
-        response = self.client.models.generate_content(
-            model="gemini-flash-latest",
-            contents=[f"Searching for: {user_prompt}\n\nContent:\n{content}"],
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                response_mime_type="application/json"
-            )
-        )
-
         try:
             return json.loads(response.text)
         except json.JSONDecodeError:
             print(f"DEBUG: nie udało się sparsować odpowiedzi: {response.text[:300]}")
             return []
         
-    def extract(self, content: str, user_prompt: str, chunk_size: int = 150_000) -> list:
+    def extract(self, content: str, user_prompt: str, chunk_size: int = 150_000, search_term: str | None = None) -> list:
         content = self._clean_html(content)
         print(f"DEBUG: cleaned content length = {len(content)}")
 
@@ -107,11 +104,24 @@ class AIExtractor:
         chunks = self._chunk_segmentation(content, chunk_size)
         print(f"DEBUG: split into {len(chunks)} chunks")
 
-        all_records = []
+        if search_term:
+            chunks = [c for c in  chunks if search_term in c] # pre-filter
+            print(f"DEBUG: after pre-filter by '{search_term}': {len(chunks)} relevant chunks")
 
-        for i, chunk in enumerate(chunks):
-            print(f"DEBUG: processing chunk {i+1}/{len(chunks)} ({len(chunk)} chars)")
-            records = self._single_extract(chunk, user_prompt)
-            all_records.extend(records)
+        all_records = []
+        
+        with ThreadPoolExecutor(min(len(chunks), 5)) as thread_executor:
+            threads = {
+                thread_executor.submit(self._single_extract, chunk, user_prompt): i
+                for i, chunk in enumerate(chunks)
+            }
+
+            completed = 0
+            for thread in as_completed(threads):
+                completed += 1
+                chunk_index = threads[thread]
+                print(f"DEBUG: chunk {chunk_index + 1}/{len(chunks)} gotowy ({completed}/{len(chunks)} total)")
+
+                all_records.extend(thread.result())
 
         return self._deduplicate(all_records)
