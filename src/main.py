@@ -7,15 +7,19 @@ from pdf_downloader import PDFDownloader
 
 def main():
     
+    start_firecrawl = time.time()
     client = FirecrawlClient()
-    
-    #page_data = client.fetch_page("https://www.ti.com/product-category/sensors/products.html")
-    product_number = "TMCS1170"
+    # page_data = client.fetch_page("https://www.ti.com/product-category/sensors/products.html")
 
     pages = client.fetch_all_pages("https://www.ti.com/product-category/sensors/products.html")
+    end_firecrawl = time.time()
+    time_firecrawl = (end_firecrawl - start_firecrawl)
+    print(f"Firecrawl time: {time_firecrawl:.2f}s")
+
     markdown_pages = [p["markdown"] for p in pages]
     merged = client.merge_pages(pages)
 
+    product_number = "TMP75"
 ###################################################
     print("Hardcoded version status: START\n")
     start1 = time.time()
@@ -38,7 +42,15 @@ def main():
     records = extractor.extract(
         markdown_pages,
         f"""
-            Find every element on the page whose MPN (product number) matches "{product_number}".
+            Find every element on the page whose MPN (product number) starts with,
+            or is a variant of, "{product_number}" - including the exact base part
+            ("{product_number}") as well as any suffixed/derivative versions
+            (e.g. automotive-qualified variants like "-Q1", grade/tolerance suffixes
+            like a trailing letter, military/space-grade variants, or any other
+            variant that shares "{product_number}" as its root/prefix).
+
+            Do NOT limit results to only an exact match of "{product_number}" -
+            include all such related variants found on the page.
 
             There may be zero, one, or multiple such elements on the page - for example,
             the same MPN could belong to different manufacturers, appear in different
