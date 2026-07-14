@@ -13,6 +13,7 @@ def main():
     product_number = "TMCS1170"
 
     pages = client.fetch_all_pages("https://www.ti.com/product-category/sensors/products.html")
+    markdown_pages = [p["markdown"] for p in pages]
     merged = client.merge_pages(pages)
 
 ###################################################
@@ -35,7 +36,7 @@ def main():
     
     extractor = AIExtractor()
     records = extractor.extract(
-        merged["markdown"],
+        markdown_pages,
         f"""
             Find every element on the page whose MPN (product number) matches "{product_number}".
 

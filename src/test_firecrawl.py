@@ -5,7 +5,6 @@ def main():
     client = FirecrawlClient()
 
     pages = client.fetch_all_pages("https://www.ti.com/product-category/sensors/products.html")
-
     merged = client.merge_pages(pages)
 
     markdown = merged["markdown"]
