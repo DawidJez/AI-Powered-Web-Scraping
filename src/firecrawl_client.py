@@ -10,6 +10,24 @@ class FirecrawlClient:
     def __init__(self, api_key: str | None = None):
         self.app = FirecrawlApp(api_key=api_key or os.getenv("FIRECRAWL_API_KEY"))
 
+    """
+    def _extract_total_count(self, markdown: str) -> int | None:
+    
+        match = re.search(r'of\s*(\d[\d,]*)', markdown, re.IGNORECASE)
+        if match:
+            return int(match.group(1).replace(",", ""))
+        return None
+    
+    def _estimate_pages_needed(self, total: int, pages: list[dict]) -> int:
+    
+        if not pages:
+            return 1
+        per_page = len(re.findall(r'\[([A-Z0-9\-]+)\]\(https?://[^\)]+\)', pages[0]["markdown"]))
+        if per_page == 0:
+            return 1
+        import math
+        return math.ceil(total / per_page)
+    """
     def fetch_page(self, url: str, scroll_rounds: int = 10, wait_for: int = 3000) -> dict:
 
         actions = []
@@ -33,45 +51,29 @@ class FirecrawlClient:
             "metadata": result.metadata.model_dump() if result.metadata else None,
         }                            # dict type data
     
-    def fetch_all_pages(self, url: str, id_pattern: str, max_pages: int = 20) -> list[dict[str, str]]:
-        # for pagination, we will fetch multiple pages by clicking "Next" button and collecting HTML content
+    # in further improvements the pages_count and id_termn will be returned 
+    # from the first page (by llm orchestrator) and used to fetch all pages automatically, 
+    # instead of hardcoding them in the function call
+    def fetch_all_pages(self, url: str, pages_count: int = 8, id_term: str = "[aria-label*='Next' i]", wait_for: int = 3000) -> list[dict[str, str]]:
         all_pages = []
-        seen_ids = set()
 
-        for page_num in range(max_pages):
-            actions = [{"type": "wait", "milliseconds": 1500}]
-
+        for page_num in range(pages_count):
+            actions = []
+        
             for _ in range(page_num):
-                actions.append({"type": "click", "selector": "[aria-label*='Next' i]"})
-                actions.append({"type": "wait", "milliseconds": 1000})
+                actions.append({"type": "click", "selector": id_term})
+                actions.append({"type": "wait", "milliseconds": 800})
 
             result = self.app.scrape_url(
-                url=url,
-                formats=["markdown", "html"],
+                url=url, 
+                formats=["markdown", "html"], 
+                wait_for=wait_for,
                 actions=actions
             )
 
-            current_ids = set(re.findall(id_pattern, result.html))
-            new_ids = current_ids - seen_ids
+            all_pages.append({"markdown": result.markdown, "html": result.html})
 
-            print(
-                f"DEBUG: strona {page_num + 1}, "
-                f"unikalnych na tej stronie: {len(current_ids)}, "
-                f"nowych: {len(new_ids)}"
-            )
-
-            if page_num > 0 and not new_ids:
-                print("DEBUG: brak nowych rekordów - koniec paginacji")
-                break
-
-            seen_ids.update(current_ids)
-
-            all_pages.append(
-                {
-                    "markdown": result.markdown,
-                    "html": result.html,
-                }
-            )
+            print(f"DEBUG: strona {page_num + 1} pobrana")
 
         return all_pages
 

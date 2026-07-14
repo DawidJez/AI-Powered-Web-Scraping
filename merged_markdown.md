@@ -5570,9 +5570,9 @@ $0.108 \| 1ku
 
 images
 
-[Humidity sensors](https://www.ti.com/product-category/sensors/humidity/products.html),
+[Digital temperature sensors](https://www.ti.com/product-category/sensors/temperature/digital/products.html),
 
-[Digital temperature sensors](https://www.ti.com/product-category/sensors/temperature/digital/products.html)
+[Humidity sensors](https://www.ti.com/product-category/sensors/humidity/products.html)
 
 Catalog
 
@@ -9322,9 +9322,9 @@ $0.171 \| 1ku
 
 images
 
-[Analog temperature sensors](https://www.ti.com/product-category/sensors/temperature/analog/products.html),
+[Temperature switches](https://www.ti.com/product-category/sensors/temperature/switches/products.html),
 
-[Temperature switches](https://www.ti.com/product-category/sensors/temperature/switches/products.html)
+[Analog temperature sensors](https://www.ti.com/product-category/sensors/temperature/analog/products.html)
 
 Automotive
 
@@ -12685,9 +12685,9 @@ $0.401 \| 1ku
 
 images
 
-[Analog temperature sensors](https://www.ti.com/product-category/sensors/temperature/analog/products.html),
+[Temperature switches](https://www.ti.com/product-category/sensors/temperature/switches/products.html),
 
-[Temperature switches](https://www.ti.com/product-category/sensors/temperature/switches/products.html)
+[Analog temperature sensors](https://www.ti.com/product-category/sensors/temperature/analog/products.html)
 
 Catalog
 

@@ -4,10 +4,7 @@ from firecrawl_client import FirecrawlClient
 def main():
     client = FirecrawlClient()
 
-    pages = client.fetch_all_pages(
-        "https://www.ti.com/product-category/sensors/products.html",
-        r'gpn="([A-Z0-9\-]+)"'
-    )
+    pages = client.fetch_all_pages("https://www.ti.com/product-category/sensors/products.html")
 
     merged = client.merge_pages(pages)
 

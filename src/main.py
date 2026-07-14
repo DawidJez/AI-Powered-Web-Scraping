@@ -9,14 +9,17 @@ def main():
     
     client = FirecrawlClient()
     
-    page_data = client.fetch_page("https://www.ti.com/product-category/sensors/products.html")
+    #page_data = client.fetch_page("https://www.ti.com/product-category/sensors/products.html")
     product_number = "TMCS1170"
+
+    pages = client.fetch_all_pages("https://www.ti.com/product-category/sensors/products.html")
+    merged = client.merge_pages(pages)
 
 ###################################################
     print("Hardcoded version status: START\n")
     start1 = time.time()
 
-    finder = ProductFinder(page_data["html"])
+    finder = ProductFinder(merged["html"])
     row = finder.find_by_mpn(product_number)
     data = finder.extract_row_data(row)
     print(f"{data}\n")
@@ -29,13 +32,12 @@ def main():
 
     print("AI version status: START\n")
     start2 = time.time()
-
+    
     extractor = AIExtractor()
     records = extractor.extract(
-        page_data["html"],
+        merged["markdown"],
         f"""
-            Find the product whose MPN (product number) is exactly "{product_number}".
-            Ignore all other products on the page.
+            Find every element on the page whose MPN (product number) matches "{product_number}".
 
             There may be zero, one, or multiple such elements on the page - for example,
             the same MPN could belong to different manufacturers, appear in different
@@ -47,10 +49,7 @@ def main():
             even if some occurrences have mostly empty/null fields.
             Do NOT guess or fabricate values for missing fields.
 
-            Do NOT merge fields from multiple occurrences into one object.
-            Do NOT guess or fabricate values for missing fields.
-
-            For this one product, extract the following fields:
+            For each matching occurrence, extract the following fields:
             - MPN
             - Product page URL
             - Product image URL
@@ -67,8 +66,8 @@ def main():
             - Full URL of the PDF datasheet
             - Full URL of the HTML datasheet
 
-            Return a JSON array with exactly ONE object for this product,
-            or an empty array [] if the MPN is not found on the page at all.
+            Return a JSON array containing one object per occurrence found.
+            If no matches are found at all, return an empty array [].
         """,
         search_term=product_number
     )
