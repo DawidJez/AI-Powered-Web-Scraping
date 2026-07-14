@@ -6,6 +6,7 @@ import json
 from bs4 import BeautifulSoup
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
 class AIExtractor:
     def __init__(self, api_key: str | None = None):
@@ -43,6 +44,7 @@ class AIExtractor:
         return unique
 
     def _single_extract(self, content: str, user_prompt: str, max_retries: int = 3):
+        start = time.time()
         system_instruction = ("""
             # Role
             You are an assistant specialized in extracting structured data from scraped web pages
@@ -115,6 +117,9 @@ class AIExtractor:
                     return []
                 
                 time.sleep(wait)
+                
+        end = time.time()
+        print(f"DEBUG: extraction time: {end - start}")
             
         try:
             return json.loads(response.text)

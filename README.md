@@ -65,37 +65,26 @@ On some READMEs, you may see small images that convey metadata, such as whether 
 
 ## Visuals
 ```
-URL
- │
- ▼
-Firecrawl
- │
- ▼
-HTML
- │
- ▼
-BeautifulSoup (clean HTML)
- │
- ▼
-Chunking
- │
- ▼
-Prefilter
- │
- ▼
-ThreadPoolExecutor
- │
- ▼
-Gemini
- │
- ▼
-Merge
- │
- ▼
-Deduplicate
- │
- ▼
-Response
+CSV z listą terminów (np. 50 MPN-ów / nazw)
+        ↓
+lista URL-i do przetworzenia (jeden albo wiele, per use case)
+        ↓
+DLA KAŻDEGO URL osobno:
+    1. Firecrawl pobiera pierwszą stronę (lekko)
+            ↓
+    2. AI: jakie filtry/pola dostępne + czy da się zawęzić (URL param / actions / brak)
+            ↓
+    3. Jeśli można zawęzić -> filtruj przed pełnym scrapem (mniej stron)
+       Jeśli nie -> pełna paginacja (fallback, Twój obecny mechanizm)
+            ↓
+    4. AIExtractor.extract(pages, prompt_z_CAŁĄ_listą_terminów, search_terms=lista)
+       -> jedno przejście przez strony, nie pętla per termin
+            ↓
+    5. Rekordy z tego URL trafiają do zbiorczej listy (z dodatkową kolumną "source_url")
+        ↓
+PO WSZYSTKICH URL-ach:
+    Excel (jeden zbiorczy plik, albo osobne arkusze per URL jeśli struktury pól się różnią)
+    PDF downloader na zebranych linkach
 ```
 
 ## Installation

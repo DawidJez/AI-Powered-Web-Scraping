@@ -3,7 +3,7 @@ import time
 from ai_extractor import AIExtractor
 
 PAGE_SEPARATOR = "=" * 50
-OUTPUT_FILE = "downloaded_pages.md"
+OUTPUT_FILE = "data/downloaded_pages.md"
 URL = "https://www.ti.com/product-category/sensors/products.html"
 
 
@@ -62,7 +62,7 @@ def main():
     """
     pages = load_pages()
 
-    product_number = "TMP275"
+    product_number = "TMP75"
 
     print("AI version status: START\n")
     start2 = time.time()

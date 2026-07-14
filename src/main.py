@@ -94,7 +94,7 @@ def main():
     print(f"\nPorównanie: hardcoded {time1:.2f}s vs AI {time2:.2f}s")
 
     excel_exporter = ExcelExporter()
-    excel_exporter.save(records, "data/exel/products.xlsx")
+    excel_exporter.save(records, f"data/exel/{product_number}_products.xlsx")
 
     downloader = PDFDownloader()
     results = downloader.download_all(records, url_field="Full URL of the PDF datasheet", name_field="MPN")
