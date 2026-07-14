@@ -11,6 +11,7 @@ import time
 class AIExtractor:
     def __init__(self, api_key: str | None = None):
         self.client = genai.Client(api_key=api_key or os.getenv("GEMINI_API_KEY"))
+        self.tokens_usage: list[dict] = []
 
     def _clean_html(self, html: str):
         #html cleaning
@@ -117,7 +118,7 @@ class AIExtractor:
                     return []
                 
                 time.sleep(wait)
-                
+
         end = time.time()
         print(f"DEBUG: extraction time: {end - start}")
             
@@ -171,3 +172,126 @@ class AIExtractor:
                 time.sleep(60)
 
         return self._deduplicate(all_records)
+    
+    def suggestion(self, content: str, max_retries: int = 3):
+        start = time.time()
+
+        system_instruction = ("""
+            # Role
+            You are a reconnaissance assistant that analyzes ONE page of scraped web content
+            (markdown) and reports what kind of data extraction is possible on it, WITHOUT
+            extracting any actual records yet.
+
+            # Task
+            Examine the content and determine:
+            1. What kind of repeating entity/record the page represents (e.g. "product",
+            "job listing", "article", "company profile"). If the page does not appear to
+            contain a repeating list of similar items, say so.
+            2. What fields/attributes appear to be available for each entity, based on visible
+            column headers, filter panels, labeled values, or repeated patterns in the text.
+            List only fields you actually observe evidence of - never invent plausible-sounding
+            fields that are not backed by the content.
+            3. Whether the page declares a total record count and/or a per-page record count
+            (e.g. phrases like "396 results", "1 to 50 of 396", "Page 1 of 8"). Extract these
+            numbers if present.
+            4. Whether the page appears to support pagination, and if so, what kind:
+            - "url_param": you see evidence of page/offset numbers likely tied to the URL
+            - "click_button": you see button/link text suggestive of manual pagination
+                (e.g. "Next", "Load more", page number links)
+            - "infinite_scroll": no visible pagination control, but the record count suggests
+                more content than currently shown
+            - "none": no evidence of more records beyond what's shown
+            - "unknown": not enough evidence to tell
+            Report the exact text/label you saw as evidence (e.g. the literal button text),
+            not a guessed CSS selector.
+            5. Whether the page appears to support filtering/narrowing results before viewing
+            all records, and if so, what kind:
+            - "url_param": you see evidence that filters might be expressed as URL query
+                parameters (e.g. visible example links with query strings)
+            - "ui_interaction": you see filter controls (dropdowns, checkboxes, filter panel
+                labels) that would need to be interacted with, not URL-based
+            - "none": no filtering capability observed
+            - "unknown": not enough evidence to tell
+            List the filter names/categories you observed (e.g. "Subcategory", "Rating"),
+            and example values if visible.
+            6. A short, friendly, human-readable recap of everything above, written for a
+            non-technical user (not a developer). Summarize in plain language: what kind of
+            data was found, roughly how much of it there is, what fields/filters are available,
+            and any relevant heads-up (e.g. many pages to go through, uncertainty in detection).
+            Avoid all technical jargon (no "selector", "URL param", "pagination type", "HTML",
+            "API", etc.) - describe things the way you'd explain them to a curious friend.
+            End this recap with a short, lightly playful line indicating you're ready and
+            waiting for the user's next instruction (e.g. what to extract, or how to narrow
+            things down) - even though you are not an autonomous agent and won't act on your
+            own, a small friendly nod to "standing by" is welcome here.
+
+            # Rules
+            - Base every answer strictly on evidence present in the provided content.
+            - If something cannot be determined from this single page, use null or an empty
+            list/string rather than guessing.
+            - Do not fabricate CSS selectors, URLs, or field values that are not directly visible.
+            - Be conservative: it is better to report "unknown" than to report a confident
+            answer that isn't supported by the text.
+            - Keep "notes" technical/internal (for developers) and "non_dev_summary" friendly/
+            plain-language (for end users) - do not mix the two styles.
+
+            # Response Format
+            Return only valid JSON matching this exact structure, with no extra text:
+            {
+            "entity_type": string or null,
+            "available_fields": [string, ...],
+            "total_records_declared": number or null,
+            "records_per_page_declared": number or null,
+            "pagination_detected": boolean,
+            "pagination_type": "url_param" | "click_button" | "infinite_scroll" | "none" | "unknown",
+            "pagination_evidence": string or null,
+            "filter_detected": boolean,
+            "filter_type": "url_param" | "ui_interaction" | "none" | "unknown",
+            "filter_options": [{"name": string, "example_values": [string, ...] or null}],
+            "notes": string,
+            "non_dev_summary": string
+            }
+        """)
+
+        response = None
+        for attempt in range(1, max_retries + 1):
+
+            # DEBUG INFO: use model="gemini-3.1-flash-lite"/"gemini-2.5-flash"/"gemini-2.5-flash-lite" 
+            # after "gemini-flash-latest" is burnt out of tokens
+            try:
+                response = self.client.models.generate_content(
+                    model="gemini-3.1-flash-lite", # <--
+                    contents=[f"Content:\n{content}"],
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json"
+                    )
+                )
+
+                metadata = response.usage_metadata
+
+                self.tokens_usage.append({
+                    "prompt_tokens": metadata.prompt_token_count,
+                    "output_tokens": metadata.candidates_token_count,
+                    "total_tokens": metadata.total_token_count
+                })
+                break
+
+            except errors.ServerError as e:
+                wait_time = 2 + 2 ** attempt
+
+                print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
+                if attempt == max_retries:
+                    print("DEBUG: The number of attempts has been exhausted; an empty response is returned.")
+                    return {}
+                
+                time.sleep(wait_time)
+
+        end = time.time()
+        print(f"\nDEBUG: suggestion time: {end - start:.2f}s")
+
+        try:
+            return json.loads(response.text)
+        except json.JSONDecodeError:
+            print(f"DEBUG: failed to parse the response: {response.text[:300]}")
+            return {}
