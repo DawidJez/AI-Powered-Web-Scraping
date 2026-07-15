@@ -1,3 +1,4 @@
+import json
 import re
 from firecrawl import FirecrawlApp
 from dotenv import load_dotenv
@@ -10,24 +11,6 @@ class FirecrawlClient:
     def __init__(self, api_key: str | None = None):
         self.app = FirecrawlApp(api_key=api_key or os.getenv("FIRECRAWL_API_KEY"))
 
-    """
-    def _extract_total_count(self, markdown: str) -> int | None:
-    
-        match = re.search(r'of\s*(\d[\d,]*)', markdown, re.IGNORECASE)
-        if match:
-            return int(match.group(1).replace(",", ""))
-        return None
-    
-    def _estimate_pages_needed(self, total: int, pages: list[dict]) -> int:
-    
-        if not pages:
-            return 1
-        per_page = len(re.findall(r'\[([A-Z0-9\-]+)\]\(https?://[^\)]+\)', pages[0]["markdown"]))
-        if per_page == 0:
-            return 1
-        import math
-        return math.ceil(total / per_page)
-    """
     def fetch_page(self, url: str, scroll_rounds: int = 10, wait_for: int = 3000) -> dict:
 
         actions = []
@@ -93,3 +76,25 @@ class FirecrawlClient:
             "markdown": merged_markdown,
             "html": merged_html,
         }
+    
+    def fetch_data_ai(self, url: str, user_prompt: str, page_sample: dict, csv_list: list[str], model: str = "spark-1-pro", max_credits = 300):
+        mpns = json.dumps(csv_list)
+        print(f"DEBUG: csv_list = {mpns}")
+        print("DEBUG: I'm here in fetch_data_ai()")
+
+        prompt = (f"""
+            Context - here is a sample of the target page's content, to help you 
+            understand its structure and where to look:\n{page_sample}\n
+            Requested MPN list (csv_list): {mpns}
+            Task: {user_prompt}\n\n
+            The target page is: {url}
+        """)
+
+        result = self.app.agent(
+            prompt=prompt,
+            model=model,
+            max_credits=max_credits
+        )
+        print(f"DEBUG: agent credits used: {getattr(result, 'credits_used', 'unknown')}")
+
+        return result

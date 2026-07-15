@@ -12,15 +12,26 @@ class AIExtractor:
     def __init__(self, api_key: str | None = None):
         self.client = genai.Client(api_key=api_key or os.getenv("GEMINI_API_KEY"))
         self.tokens_usage: list[dict] = []
+        self.model: str = "gemini-3.1-flash-lite"
+        # DEBUG INFO: use model="gemini-3.1-flash-lite"/"gemini-2.5-flash"/"gemini-2.5-flash-lite" 
+        # after "gemini-flash-latest" is burnt out of tokens
 
-    def _clean_html(self, html: str):
-        #html cleaning
+    def _extract_html_window(self, html: str, search_term: str, window_size: int = 15000) -> str:
         soup = BeautifulSoup(html, "html.parser")
 
-        for tag in soup(["script", "style", "svg", "noscript"]):
-            tag.decompose()
+        for trash_tag in soup(["script", "style"]):
+            trash_tag.decompose()
+
+        clean_html = soup.prettify()
+
+        idx = clean_html.find(search_term)
+        if idx == -1:
+            return ""
         
-        return str(soup)
+        start = max(0, idx - window_size)
+        end = min(len(clean_html), idx + len(search_term) + window_size)
+
+        return clean_html[start:end]
     
     def _chunk_segmentation(self, load: str, chunk_size: int, overlap: int = 2000) -> list[str]:
         chunks = []
@@ -95,7 +106,7 @@ class AIExtractor:
         for attempt in range(1, max_retries + 1):
             try:
                 response = self.client.models.generate_content(
-                    model="gemini-flash-latest",
+                    model=self.model,
                     contents=[f"Searching for: {user_prompt}\n\nContent:\n{content}"],
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
@@ -214,7 +225,11 @@ class AIExtractor:
             - "unknown": not enough evidence to tell
             List the filter names/categories you observed (e.g. "Subcategory", "Rating"),
             and example values if visible.
-            6. A short, friendly, human-readable recap of everything above, written for a
+            6. Whether the page offers a bulk/batch search feature - a way to submit multiple
+            identifiers at once (e.g. "paste part numbers", "BOM search", "cross-reference
+            tool", a multi-line text input for search terms). This is different from a normal
+            single-term search box. Report the literal text/label if found, or false if not found.
+            7. A short, friendly, human-readable recap of everything above, written for a
             non-technical user (not a developer). Summarize in plain language: what kind of
             data was found, roughly how much of it there is, what fields/filters are available,
             and any relevant heads-up (e.g. many pages to go through, uncertainty in detection).
@@ -256,11 +271,9 @@ class AIExtractor:
         response = None
         for attempt in range(1, max_retries + 1):
 
-            # DEBUG INFO: use model="gemini-3.1-flash-lite"/"gemini-2.5-flash"/"gemini-2.5-flash-lite" 
-            # after "gemini-flash-latest" is burnt out of tokens
             try:
                 response = self.client.models.generate_content(
-                    model="gemini-3.1-flash-lite", # <--
+                    model=self.model,
                     contents=[f"Content:\n{content}"],
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
@@ -289,6 +302,82 @@ class AIExtractor:
 
         end = time.time()
         print(f"\nDEBUG: suggestion time: {end - start:.2f}s")
+
+        try:
+            return json.loads(response.text)
+        except json.JSONDecodeError:
+            print(f"DEBUG: failed to parse the response: {response.text[:300]}")
+            return {}
+        
+    def analize_html(self, html: str, search_term: str, max_retries: int = 3):
+        start = time.time()
+        
+        html_window = self._extract_html_window(html, search_term)
+
+        if not html_window:
+            return {"selector": None, "confidence": "none", "evidence": "text not found in HTML"}
+        
+        system_instruction = ("""
+            # Role
+            You analyze a small HTML fragment to find the clickable element that
+            corresponds to a specific visible label/text.
+
+            # Task
+            Given the fragment and a target label, identify the actual HTML element
+            (or its nearest clickable ancestor - input, button, a, or an element with
+            role="button"/"checkbox"/"option") that represents this label.
+
+            Build a CSS selector using ONLY attributes that are LITERALLY present in
+            the given fragment (id, class, name, aria-label, data-* attributes, role).
+            Prefer, in order of preference: id > data-* attributes > aria-label > a
+            unique combination of tag + class.
+
+            Never invent an attribute or value that is not visibly present in the
+            fragment. If no attribute is unique/reliable enough to build a confident
+            selector, return null for "selector" and explain why in "evidence" -
+            do NOT guess a selector just to provide an answer.
+
+            # Response Format
+            Return only valid JSON:
+            {
+            "selector": string or null,
+            "confidence": "high" | "low" | "none",
+            "evidence": string
+            }
+        """)
+
+        response = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=[f"Content:\n{html_window}"],
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json"
+                    )
+                )
+                
+                metadata = response.usage_metadata
+                self.tokens_usage.append({
+                    "prompt_tokens": metadata.prompt_token_count,
+                    "output_tokens": metadata.candidates_token_count,
+                    "total_tokens": metadata.total_token_count
+                })
+                break
+
+            except errors.ServerError as e:
+                wait_time = 2 + 2 ** attempt
+
+                print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
+                if attempt == max_retries:
+                    print("DEBUG: The number of attempts has been exhausted; an empty response is returned.")
+                    return {}
+                
+                time.sleep(wait_time)
+
+        end = time.time()
+        print(f"\nDEBUG: analize_html time: {end - start:.2f}s")
 
         try:
             return json.loads(response.text)
