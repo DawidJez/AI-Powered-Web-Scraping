@@ -29,15 +29,37 @@ class Orchestrator:
         return result
 
     def filtered_scraping(self, url: str, analisys: dict, page_sample_result: dict, csv_list: list[str], user_choice: str) -> dict:
+       
         selector = analisys["selector"]
         filter_options = page_sample_result.get("filter_options",[])
+        available_fields = page_sample_result.get("available_fields", [])
 
         matched_filter = next((f for f in filter_options if f["name"] == user_choice), None)
+        filter = matched_filter
 
         if matched_filter is None:
-            raise ValueError(f"Filter '{user_choice}' not found in detected filter_options")
+            matched_filter = next((f for f in available_fields if f == user_choice), None) # dict -> str
 
-        filtered_data = self.firecrawl.fetch_filtered_data(url, selector, matched_filter, csv_list)
+            if matched_filter is None:
+                raise ValueError(f"Filter '{user_choice}' not found in detected filter_options")
+            
+            identifier_hints = ["number", "id", "code", "part", "sku", "mpn", "name"]
+            matched_filter_lc = matched_filter.lower()
+
+            if any(hint in matched_filter_lc for hint in identifier_hints):
+                filter = {
+                    "name": matched_filter,
+                    "cardinality": "identifier",
+                    "example_values": None
+                }
+            else:
+                filter = {
+                    "name": matched_filter,
+                    "cardinality": "category",
+                    "example_values": None
+                }
+                
+        filtered_data = self.firecrawl.fetch_filtered_data(url, selector, filter, csv_list)
 
         return filtered_data
 
@@ -85,7 +107,8 @@ class Orchestrator:
             If none of the requested MPNs are found, return an empty array [].
         """
 
-        start = time.time()
+        start_test = time.time()
+        print("DEBUG: Start testu")
 
         with open("data/test_files/test_page_sample.txt", "r", encoding="utf-8") as f:
             test_content = f.read()
@@ -94,17 +117,34 @@ class Orchestrator:
         #    "markdown_result": "",
         #    "html_to_analize": test_content
         #}
-
+        """
+        start_sample = time.time()
         result = self.page_sample(url)
-        print(f"DEBUG: sample page result = \n{result['markdown_result']}")
+        end_sample = time.time()
+        
+        print(f"DEBUG: sample page result = \n{result["page_sample_result"]}")
         user_choice = input("Enter your choice: ").strip()
         #csv_list = ["TMP75","TMP117","TMP275"]
         csv_list = ["TMP117"]
 
+        start_analisys = time.time()
         analisys = self.search_for_filters(result["html_to_analize"], user_choice)
-        filtered_data = self.filtered_scraping(url, analisys, result["page_sample_result"], csv_list, user_choice)
+        end_analisys = time.time()
+        """
+        start_filter = time.time()
+        #filtered_data = self.filtered_scraping(url, analisys, result["page_sample_result"], csv_list, user_choice)
+        selector = "input[aria-label='Product number Filter Input']"
+        selector = "[aria-label*='Product number Filter Input']"
+        filter = {
+            "name": "Product number",
+            "cardinality": "identifier",
+            "example_values": None
+        }
+        csv_list = ["TMP117"]
+        filtered_data = self.firecrawl.fetch_filtered_data(url, selector, filter, csv_list)
+        end_filter= time.time()
 
-        end = time.time()
+        end_test = time.time()
         
         prompt_tokens = sum(t["prompt_tokens"] for t in self.extractor.tokens_usage)
         output_tokens = sum(t["output_tokens"] for t in self.extractor.tokens_usage)
@@ -116,10 +156,13 @@ class Orchestrator:
         print(f"Output tokens : {output_tokens:,}")
         print(f"Total tokens  : {total_tokens:,}")
         
-        print(f"DEBUG: test time: {end - start}")
+        print(f"DEBUG: test time: {end_test - start_test}")
+        print(f"\nDEBUG: suggestion time: {end_sample - start_sample:.2f}s")
+        print(f"\nDEBUG: analisys time: {end_analisys - start_analisys:.2f}s")
+        print(f"\nDEBUG: filtering data time: {end_filter - start_filter:.2f}s")
 
         # print(f"\nDEBUG: result = \n{result}")
-        print(f"DEBUG: sample page result = \n{result['markdown_result']}")
-        print(f"DEBUG: analized html result = \n{analisys}")
-        print(f"DEBUG: analized html result = \n{filtered_data}")
+        print(f"DEBUG: sample page result = \n{result["page_sample_result"]}")
+        print(f"DEBUG: analisys result = \n{analisys}")
+        print(f"DEBUG: filtered data result = \n{filtered_data}")
         return 1

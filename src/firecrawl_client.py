@@ -150,6 +150,7 @@ class FirecrawlClient:
 
     def fetch_filtered_data(self, url: str, selector: str, filter: dict, items_list: list) -> dict:
         filtered_data = []
+        print(selector)
 
         if filter["cardinality"]== "identifier":
             for item in items_list: 

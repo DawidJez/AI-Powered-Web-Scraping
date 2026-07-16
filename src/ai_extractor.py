@@ -192,8 +192,9 @@ class AIExtractor:
 
         return self._deduplicate(all_records)
     
+
+
     def suggestion(self, content: str, max_retries: int = 3):
-        start = time.time()
 
         system_instruction = ("""
             # Role
@@ -247,6 +248,14 @@ class AIExtractor:
             waiting for the user's next instruction (e.g. what to extract, or how to narrow
             things down) - even though you are not an autonomous agent and won't act on your
             own, a small friendly nod to "standing by" is welcome here.
+            
+            IMPORTANT: In grid/table layouts, it is common for EVERY column to have its own
+            filter (e.g. a floating filter input below each header, even if not visually
+            prominent). As a default assumption, treat every field listed in "available_fields"
+            as ALSO having a corresponding filter in "filter_options", unless you see clear
+            evidence that a specific field does NOT have one. Do not require strong/explicit
+            proof of a filter's existence before including it - the default expectation is that
+            it exists.
 
             # Rules
             - Base every answer strictly on evidence present in the provided content.
@@ -308,9 +317,6 @@ class AIExtractor:
                 
                 time.sleep(wait_time)
 
-        end = time.time()
-        print(f"\nDEBUG: suggestion time: {end - start:.2f}s")
-
         try:
             return json.loads(response.text)
         except json.JSONDecodeError:
@@ -321,7 +327,6 @@ class AIExtractor:
 
 
     def analize_html(self, html: str, search_term: str, max_retries: int = 3):
-        start = time.time()
         
         html_windows = self._extract_html_windows(html, search_term)
 
@@ -401,9 +406,6 @@ class AIExtractor:
                     return {}
                 
                 time.sleep(wait_time)
-
-        end = time.time()
-        print(f"\nDEBUG: analize_html time: {end - start:.2f}s")
 
         try:
             return json.loads(response.text)
