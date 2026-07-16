@@ -16,7 +16,7 @@ class AIExtractor:
         # DEBUG INFO: use model="gemini-3.1-flash-lite"/"gemini-2.5-flash"/"gemini-2.5-flash-lite" 
         # after "gemini-flash-latest" is burnt out of tokens
 
-    def _extract_html_window(self, html: str, search_term: str, window_size: int = 15000) -> str:
+    def _extract_html_windows(self, html: str, search_term: str, window_size: int = 3000) -> list[dict]:
         soup = BeautifulSoup(html, "html.parser")
 
         for trash_tag in soup(["script", "style"]):
@@ -24,15 +24,23 @@ class AIExtractor:
 
         clean_html = soup.prettify()
 
-        idx = clean_html.find(search_term)
-        if idx == -1:
-            return ""
-        
-        start = max(0, idx - window_size)
-        end = min(len(clean_html), idx + len(search_term) + window_size)
+        windows = []
+        start_idx = 0
 
-        return clean_html[start:end]
-    
+        while len(clean_html) > start_idx:
+            idx = clean_html.find(search_term, start_idx)
+            if idx == -1:
+                break
+            
+            start = max(0, idx - window_size)
+            end = min(len(clean_html), idx + len(search_term) + window_size)
+
+            windows.append({"occurrence_index": len(windows), "fragment": clean_html[start:end]})
+
+            start_idx = idx + len(search_term)
+
+        return windows
+
     def _chunk_segmentation(self, load: str, chunk_size: int, overlap: int = 2000) -> list[str]:
         chunks = []
         start = 0
@@ -262,7 +270,7 @@ class AIExtractor:
             "pagination_evidence": string or null,
             "filter_detected": boolean,
             "filter_type": "url_param" | "ui_interaction" | "none" | "unknown",
-            "filter_options": [{"name": string, "example_values": [string, ...] or null}],
+            "filter_options": [{"name": string, "cardinality": "identifier" | "category", "example_values": [string, ...] or null}],
             "notes": string,
             "non_dev_summary": string
             }
@@ -309,37 +317,55 @@ class AIExtractor:
             print(f"DEBUG: failed to parse the response: {response.text[:300]}")
             return {}
         
+
+
+
     def analize_html(self, html: str, search_term: str, max_retries: int = 3):
         start = time.time()
         
-        html_window = self._extract_html_window(html, search_term)
+        html_windows = self._extract_html_windows(html, search_term)
 
-        if not html_window:
+        if not html_windows:
             return {"selector": None, "confidence": "none", "evidence": "text not found in HTML"}
+        
+        combined_windows = "\n\n".join(
+            f"--- Occurrence {w['occurrence_index']} ---\n{w['fragment']}"
+            for w in html_windows
+        )
         
         system_instruction = ("""
             # Role
-            You analyze a small HTML fragment to find the clickable element that
-            corresponds to a specific visible label/text.
+            You are given several HTML fragments, each showing a different occurrence of the
+            same target label somewhere on a page. Your job is to identify which occurrence
+            (if any) represents a GLOBAL FILTER CONTROL - an element that, when interacted with,
+            would narrow down the entire list/table of records shown on the page to only those
+            matching this label.
+
+            # What counts as a filter control
+            Typically a checkbox, toggle, radio button, or selectable option inside a panel
+            labeled something like "Filters", often near other similar options, usually an
+            <input type="checkbox">, an element with role="checkbox"/"option", or a clickable
+            label/button specifically meant for narrowing results.
+
+            # What does NOT count as a filter control
+            A plain link (<a>) inside a data row/cell that navigates to a completely different
+            page (e.g. a product's subcategory page), or any occurrence that is just descriptive
+            text unrelated to filtering. Do not confuse a per-row data link with a filter control,
+            even if both contain the same visible text.
 
             # Task
-            Given the fragment and a target label, identify the actual HTML element
-            (or its nearest clickable ancestor - input, button, a, or an element with
-            role="button"/"checkbox"/"option") that represents this label.
+            Review all provided fragments (each labeled with its occurrence_index). Pick the
+            ONE fragment that most clearly represents a real filter control. Build a CSS
+            selector using ONLY attributes LITERALLY present in that fragment (id, class, name,
+            aria-label, data-* attributes, role). Never invent attributes not visibly present.
 
-            Build a CSS selector using ONLY attributes that are LITERALLY present in
-            the given fragment (id, class, name, aria-label, data-* attributes, role).
-            Prefer, in order of preference: id > data-* attributes > aria-label > a
-            unique combination of tag + class.
-
-            Never invent an attribute or value that is not visibly present in the
-            fragment. If no attribute is unique/reliable enough to build a confident
-            selector, return null for "selector" and explain why in "evidence" -
-            do NOT guess a selector just to provide an answer.
+            If NONE of the fragments look like a real filter control, return null for "selector"
+            and explain why in "evidence".
 
             # Response Format
             Return only valid JSON:
             {
+            "chosen_occurrence_index": integer or null,
             "selector": string or null,
             "confidence": "high" | "low" | "none",
             "evidence": string
@@ -351,7 +377,7 @@ class AIExtractor:
             try:
                 response = self.client.models.generate_content(
                     model=self.model,
-                    contents=[f"Content:\n{html_window}"],
+                    contents=[f"Target label: {search_term}\n\nHTML fragment:\n{combined_windows}"],
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
                         response_mime_type="application/json"

@@ -77,6 +77,8 @@ class FirecrawlClient:
             "html": merged_html,
         }
     
+    # gówno nie działa, za wolne, za głupie, za mało kredytów co kolwiek, jebał to pies trzeba własne kuźwa robić, 
+    # niech to szlag jasny trafi (tą linie copilot napisał akurat, wie co jest na rzeczy)
     def fetch_data_ai(self, url: str, user_prompt: str, page_sample: dict, csv_list: list[str], model: str = "spark-1-pro", max_credits = 300):
         mpns = json.dumps(csv_list)
         print(f"DEBUG: csv_list = {mpns}")
@@ -98,3 +100,65 @@ class FirecrawlClient:
         print(f"DEBUG: agent credits used: {getattr(result, 'credits_used', 'unknown')}")
 
         return result
+    
+    # WARNING: think what if there will be multiple pages, maybe ai should
+    # check again if there is multiple pages and how to get/scroll to next page,
+    # in this case we should also return the html for ai to analize;
+    # jakby co to ja piszę takie fajne kom nie ai slop
+    def _single_fetch(self,url: str, item: str, selector: str, wait_for: int = 3000) -> dict:
+        actions = [
+            {"type": "click", "selector": selector},
+            {"type": "write", "text": item},
+            {"type": "wait", "milliseconds": 1500}
+        ]
+
+        result = self.app.scrape_url(
+            url=url,
+            formats=['markdown', 'links'],
+            wait_for=wait_for,
+            actions=actions
+        )
+
+        return {
+            "records": result.markdown,
+            "links": result.links,
+            "metadata": result.metadata
+        }
+    
+    def _bulk_fetch(self,url: str, item_list: list, selector: str, wait_for: int = 3000) -> dict:
+        separator: str = ", "
+        text_list = separator.join(item_list)
+
+        actions = [
+            {"type": "click", "selector": selector},
+            {"type": "write", "text": text_list},
+            {"type": "wait", "milliseconds": 1500}
+        ]
+
+        result = self.app.scrape_url(
+            url=url,
+            formats=['markdown', 'links'],
+            wait_for=wait_for,
+            actions=actions
+        )
+
+        return {
+            "records": result.markdown,
+            "links": result.links,
+            "metadata": result.metadata
+        }
+
+    def fetch_filtered_data(self, url: str, selector: str, filter: dict, items_list: list) -> dict:
+        filtered_data = []
+
+        if filter["cardinality"]== "identifier":
+            for item in items_list: 
+                result = self._single_fetch(url, item, selector)
+                filtered_data.append(result)
+        elif filter.get("bulk_search_supported"):
+            result = self._bulk_fetch(url, items_list, selector)
+            filtered_data.append(result)
+        else:
+            raise NotImplementedError("category filter handling not implemented yet")
+
+        return filtered_data

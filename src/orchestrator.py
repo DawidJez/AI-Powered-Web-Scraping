@@ -16,7 +16,7 @@ class Orchestrator:
 
         page = self.firecrawl.fetch_page(url)
         result = {
-            "markdown_result": self.extractor.suggestion(page["markdown"]),
+            "page_sample_result": self.extractor.suggestion(page["markdown"]),
             "html_to_analize": page["html"]
         }
 
@@ -28,12 +28,19 @@ class Orchestrator:
 
         return result
 
-    def filtered_scraping(self, url: str, user_prompt: str, contents: dict, csv_list: list[str]) -> dict:
+    def filtered_scraping(self, url: str, analisys: dict, page_sample_result: dict, csv_list: list[str], user_choice: str) -> dict:
+        selector = analisys["selector"]
+        filter_options = page_sample_result.get("filter_options",[])
 
-        filtered_data = self.firecrawl.fetch_with_filters(url, user_prompt, contents, csv_list)
+        matched_filter = next((f for f in filter_options if f["name"] == user_choice), None)
 
-        raise NotImplementedError("filtered_scraping() is not yet implemented. Please implement it to process the filtered_data and return the desired output.")
-    
+        if matched_filter is None:
+            raise ValueError(f"Filter '{user_choice}' not found in detected filter_options")
+
+        filtered_data = self.firecrawl.fetch_filtered_data(url, selector, matched_filter, csv_list)
+
+        return filtered_data
+
     def test(self):
         url = "https://www.ti.com/product-category/sensors/products.html"
         user_prompt = f"""
@@ -78,16 +85,24 @@ class Orchestrator:
             If none of the requested MPNs are found, return an empty array [].
         """
 
+        start = time.time()
+
+        with open("data/test_files/test_page_sample.txt", "r", encoding="utf-8") as f:
+            test_content = f.read()
+        
+        #result = {
+        #    "markdown_result": "",
+        #    "html_to_analize": test_content
+        #}
+
+        result = self.page_sample(url)
+        print(f"DEBUG: sample page result = \n{result['markdown_result']}")
+        user_choice = input("Enter your choice: ").strip()
         #csv_list = ["TMP75","TMP117","TMP275"]
         csv_list = ["TMP117"]
 
-        start = time.time()
-
-        result = self.page_sample(url)
-        # result = {'entity_type': 'product', 'available_fields': ['Solution name', 'Product number', 'Price/Quantity (USD)', 'Operating temperature range (°C)', 'Rating', 'Package size (L x W) (mm)', 'Package type', 'Pin count', 'TI functional safety category', 'Package area (mm^2)', 'Subcategory', 'Status'], 'total_records_declared': 396, 'records_per_page_declared': 50, 'pagination_detected': True, 'pagination_type': 'click_button', 'pagination_evidence': 'Page 1 of 8', 'filter_detected': True, 'filter_type': 'ui_interaction', 'filter_options': [{'name': 'Subcategory', 'example_values': None}, {'name': 'Rating', 'example_values': None}, {'name': 'Package type', 'example_values': None}, {'name': 'Pin count', 'example_values': None}, {'name': 'TI functional safety category', 'example_values': None}, {'name': 'Operating temperature range (°C)', 'example_values': None}, {'name': 'Package area (mm^2)', 'example_values': None}, {'name': 'Price/Quantity (USD)', 'example_values': None}, {'name': 'Status', 'example_values': None}], 'notes': "The page displays a table of sensor products. Pagination is explicitly indicated by the 'Page 1 of 8' label at the bottom. Filtering appears to be controlled via a UI interaction panel (parametric-filter).", 'non_dev_summary': "I found a list of 396 sensors, which are spread across 8 pages. You can view key details for each, such as the product name, price, operating temperature, and physical size. There are various filters available through the website's interface to help you narrow down your search, such as filtering by package type or subcategory. Everything looks ready to go, so just let me know if you'd like me to start gathering the details for you!"}
-        
-        user_choice = "Hall-effect current sensors"
-        analized_html = self.search_for_filters(result["html_to_analize"], user_choice)
+        analisys = self.search_for_filters(result["html_to_analize"], user_choice)
+        filtered_data = self.filtered_scraping(url, analisys, result["page_sample_result"], csv_list, user_choice)
 
         end = time.time()
         
@@ -104,6 +119,7 @@ class Orchestrator:
         print(f"DEBUG: test time: {end - start}")
 
         # print(f"\nDEBUG: result = \n{result}")
-        print(f"DEBUG: sample page result = \n{result}")
-        print(f"DEBUG: analized html result = \n{analized_html}")
+        print(f"DEBUG: sample page result = \n{result['markdown_result']}")
+        print(f"DEBUG: analized html result = \n{analisys}")
+        print(f"DEBUG: analized html result = \n{filtered_data}")
         return 1
