@@ -117,7 +117,7 @@ class Orchestrator:
         #    "markdown_result": "",
         #    "html_to_analize": test_content
         #}
-        """
+        #"""
         start_sample = time.time()
         result = self.page_sample(url)
         end_sample = time.time()
@@ -130,18 +130,17 @@ class Orchestrator:
         start_analisys = time.time()
         analisys = self.search_for_filters(result["html_to_analize"], user_choice)
         end_analisys = time.time()
-        """
+        #"""
         start_filter = time.time()
-        #filtered_data = self.filtered_scraping(url, analisys, result["page_sample_result"], csv_list, user_choice)
-        selector = "input[aria-label='Product number Filter Input']"
-        selector = "[aria-label*='Product number Filter Input']"
-        filter = {
-            "name": "Product number",
-            "cardinality": "identifier",
-            "example_values": None
-        }
-        csv_list = ["TMP117"]
-        filtered_data = self.firecrawl.fetch_filtered_data(url, selector, filter, csv_list)
+        filtered_data = self.filtered_scraping(url, analisys, result["page_sample_result"], csv_list, user_choice)
+        #selector = "input[aria-label='Product number Filter Input']"
+        #filter = {
+        #    "name": "Product number",
+        #    "cardinality": "identifier",
+        #    "example_values": None
+        #}
+        #csv_list = ["TMP117"]
+        #filtered_data = self.firecrawl.fetch_filtered_data(url, selector, filter, csv_list)
         end_filter= time.time()
 
         end_test = time.time()

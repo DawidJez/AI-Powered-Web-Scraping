@@ -367,6 +367,14 @@ class AIExtractor:
             If NONE of the fragments look like a real filter control, return null for "selector"
             and explain why in "evidence".
 
+            CRITICAL: Never select an element that has a "disabled" attribute, or that appears
+            to be a hidden/internal implementation detail (e.g. zero-size, aria-hidden, or part
+            of a data-grid's internal filter row that isn't the page's actual visible search
+            control). If the fragment shows both a disabled/hidden input AND a separate visible
+            custom element (e.g. a custom tag like <ti-search-field>, or any element with a
+            visible "placeholder" attribute suggesting it's meant for user typing), prefer the
+            visible custom element instead. Explain this reasoning in "evidence" if relevant.
+                              
             # Response Format
             Return only valid JSON:
             {
