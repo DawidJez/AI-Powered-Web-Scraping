@@ -368,31 +368,56 @@ class AIExtractor:
         system_instruction = ("""
             # Role
             You are given several HTML fragments, each showing a different occurrence of the
-            same target label somewhere on a page. Your job is to identify which occurrence
-            (if any) represents a GLOBAL FILTER CONTROL - an element that, when interacted with,
-            would narrow down the entire list/table of records shown on the page to only those
-            matching this label.
+            same target label somewhere on a page. Your job is to identify the FULL interaction
+            path needed to filter the page's data by this label - not just a single element.
 
-            # What counts as a filter control
-            Typically a checkbox, toggle, radio button, or selectable option inside a panel
-            labeled something like "Filters", often near other similar options, usually an
-            <input type="checkbox">, an element with role="checkbox"/"option", or a clickable
-            label/button specifically meant for narrowing results.
+            # Key concept: gate vs target
+            Some filter controls are directly interactable (a visible checkbox/input right there
+            on the page). Others are hidden behind a GATE - a button/menu trigger (e.g. "Open
+            Filter Menu", "Filters" button, a column header's filter icon) that must be clicked
+            FIRST to reveal a panel containing the actual field-specific control.
 
-            # What does NOT count as a filter control
-            A plain link (<a>) inside a data row/cell that navigates to a completely different
-            page (e.g. a product's subcategory page), or any occurrence that is just descriptive
-            text unrelated to filtering. Do not confuse a per-row data link with a filter control,
-            even if both contain the same visible text.
+            Distinguish between:
+            - A fragment that IS the actual interactable control for THIS specific field
+            (e.g. a checkbox/input whose label or nearby text matches the target field name)
+            - A fragment that is a GENERIC gate opening a panel with MANY unrelated fields inside
+            (e.g. "Open Filter Menu", "Filters", a hamburger/funnel icon) - this is not
+            specific to the target field, it's shared infrastructure
+
+            If you only see a generic gate in the fragments (no fragment shows the field-specific
+            control itself, e.g. because it only appears after the gate is clicked), report that
+            explicitly - do not treat the gate itself as if it were the field's filter control.
+
+            # What counts as a real field-specific filter control
+            Typically a checkbox, toggle, radio button, dropdown option, or text input whose
+            label/name/aria-label/nearby text matches the target field - meant to narrow results
+            specifically by that field's value.
+
+            # What does NOT count
+            - A plain link (<a>) inside a data row/cell navigating to a different page
+            - A generic gate/menu-opener not specific to this field (see above - report separately)
+            - Purely descriptive text unrelated to filtering
 
             # Task
-            Review all provided fragments (each labeled with its occurrence_index). Pick the
-            ONE fragment that most clearly represents a real filter control. Build a CSS
-            selector using ONLY attributes LITERALLY present in that fragment (id, class, name,
-            aria-label, data-* attributes, role). Never invent attributes not visibly present.
+            Review all provided fragments (each labeled with its occurrence_index). For the TARGET
+            field, determine:
 
-            If NONE of the fragments look like a real filter control, return null for "selector"
-            and explain why in "evidence".
+            1. Is there a fragment showing the field's OWN interactable control? If yes, that's
+            your target_selector.
+            2. Does reaching that control require first clicking a gate (a menu/panel opener)?
+            If a gate fragment is visible, report its selector separately in "gate_selector".
+            If the field's control is already directly visible/interactable with no gate
+            needed, set "gate_selector" to null.
+            3. What TYPE of interaction does the target control need once reachable?
+            - "type": a text input where you type a value
+            - "click_checkbox": a checkbox/toggle to click for a specific value
+            - "click_option": a selectable list item/radio for a specific value
+            - "select_dropdown": a <select> or dropdown-style element
+            - "unknown": control type unclear from the fragment
+
+            Build CSS selectors using ONLY attributes LITERALLY present in the fragments (id,
+            class, name, aria-label, data-* attributes, role). Never invent attributes not
+            visibly present.
 
             CRITICAL: Never select an element that has a "disabled" attribute, or that appears
             to be a hidden/internal implementation detail (e.g. zero-size, aria-hidden, or part
@@ -401,12 +426,18 @@ class AIExtractor:
             custom element (e.g. a custom tag like <ti-search-field>, or any element with a
             visible "placeholder" attribute suggesting it's meant for user typing), prefer the
             visible custom element instead. Explain this reasoning in "evidence" if relevant.
-                              
+
+            If NONE of the fragments look like a real filter control (field-specific or gate),
+            return null for both selectors and explain why in "evidence".
+
             # Response Format
             Return only valid JSON:
             {
             "chosen_occurrence_index": integer or null,
-            "selector": string or null,
+            "gate_selector": string or null,
+            "gate_needed": boolean,
+            "target_selector": string or null,
+            "interaction_type": "type" | "click_checkbox" | "click_option" | "select_dropdown" | "unknown",
             "confidence": "high" | "low" | "none",
             "evidence": string
             }
@@ -489,3 +520,140 @@ class AIExtractor:
         print(response.text)
 
         return response.text
+    
+    def find_selector(self, selectors: list, filter: dict, html: str, max_retries: int = 3) -> dict:
+        """we take the filter["name"] so llm will know what its actually looking for"""
+
+        search_term = filter["name"]
+        html_windows = self._extract_html_windows(html, search_term)
+
+        if not html_windows:
+            return {"selector": None, "confidence": "none", "evidence": "text not found in HTML"}
+        
+        combined_windows = "\n\n".join(
+            f"--- Occurrence {w['occurrence_index']} ---\n{w['fragment']}"
+            for w in html_windows
+        )
+
+        system_instruction = ("""
+            # Role
+            You are given HTML fragments showing occurrences of a target field name, found
+            inside a page AFTER a sequence of clicks has already been performed to open some
+            filter panel/menu. Your job is to determine the NEXT single interaction step needed
+            to reach an actual, usable filter control for this field - and whether that step
+            is already the final control, or just another intermediate step deeper into a
+            nested menu.
+
+            # Context
+            This is one step in a multi-click discovery process. Earlier clicks already opened
+            a panel (e.g. a generic "Filters" menu). Now you're looking at what that panel
+            revealed, specifically around occurrences of the target field's name. Sometimes
+            a single field name inside a filter panel is itself an intermediate control - e.g.
+            clicking the field name row/label opens a SUB-panel with the field's actual options
+            (checkboxes, a search input, a range slider). Other times, the field name occurrence
+            already IS or directly precedes the final interactive control.
+
+            # Task
+            Review the provided fragments (each labeled with occurrence_index) and determine:
+
+            1. Is there a genuinely interactive element (input, checkbox, radio, button, role=
+            "option"/"button"/"checkbox", clickable label, dropdown trigger, etc.) associated
+            with the target field's name in any fragment? If multiple candidates exist, pick
+            the one most clearly tied to the target field specifically (not a generic sibling
+            control for a different field that happens to be nearby).
+
+            2. Classify what that element does:
+            - "final_control": interacting with it directly narrows results by this field
+                (e.g. a text input to type a value, a checkbox for one specific value, a
+                dropdown/select already showing this field's values)
+            - "intermediate_step": interacting with it reveals a FURTHER sub-panel/submenu
+                specific to this field, which itself will contain the final control (e.g.
+                clicking the field's row/label expands an accordion, opens a flyout, or
+                navigates one level deeper before any actual filter value can be set)
+            - "none": no interactive element found for this field in these fragments -
+                only descriptive/non-interactive text, or the field is not present here at all
+
+            3. Based on the classification, set "needs_more_depth":
+            - true only for "intermediate_step" - meaning: after this click, another
+                iteration of this same discovery process should run again on the newly
+                revealed content to find the field's actual final control
+            - false for "final_control" (we're done, this is directly usable) or "none"
+                (nothing found, retrying deeper here would not help)
+
+            4. What TYPE of interaction does the chosen element need?
+            - "type": a text input where you type a value
+            - "click_checkbox": a checkbox/toggle for a specific value
+            - "click_option": a selectable list item/radio for a specific value
+            - "click_expand": clicking to reveal a sub-panel (only valid when
+                needs_more_depth is true)
+            - "select_dropdown": a <select> or dropdown-style element
+            - "unknown": type unclear from the fragment
+
+            Build the CSS selector using ONLY attributes LITERALLY present in the fragment
+            (id, class, name, aria-label, data-* attributes, role). Never invent attributes
+            not visibly present in the HTML.
+
+            # What to avoid
+            - Do not select a plain data-row link (<a>) that navigates to an unrelated page
+            (e.g. a product page), even if its text happens to match the target field name.
+            - Do not select an element with a "disabled" attribute, or one that is clearly
+            hidden/zero-size/aria-hidden.
+            - Do not select a control that clearly belongs to a DIFFERENT field, even if it's
+            positioned near the target field's occurrence.
+            - If the same target text appears both as a plain label AND as part of an
+            interactive element (e.g. a checkbox with an associated <label>), select the
+            actual interactive element (input/checkbox/role) itself, not just the label
+            text node, unless the label is what's clickable (e.g. wraps the input or has
+            a "for" attribute pointing to it - then the label itself is a valid choice).
+
+            If nothing usable is found across all fragments, return null for "selector",
+            "none" for "control_type", false for "needs_more_depth", and explain in "evidence".
+
+            # Response Format
+            Return only valid JSON:
+            {
+            "chosen_occurrence_index": integer or null,
+            "selector": string or null,
+            "control_type": "final_control" | "intermediate_step" | "none",
+            "needs_more_depth": boolean,
+            "interaction_type": "type" | "click_checkbox" | "click_option" | "click_expand" | "select_dropdown" | "unknown",
+            "confidence": "high" | "low" | "none",
+            "evidence": string
+            }
+        """)
+
+        response = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=[f"Target label: {search_term}\n\nHTML fragment:\n{combined_windows}"],
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json"
+                    )
+                )
+                
+                metadata = response.usage_metadata
+                self.tokens_usage.append({
+                    "prompt_tokens": metadata.prompt_token_count,
+                    "output_tokens": metadata.candidates_token_count,
+                    "total_tokens": metadata.total_token_count
+                })
+                break
+
+            except errors.ServerError as e:
+                wait_time = 2 + 2 ** attempt
+
+                print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
+                if attempt == max_retries:
+                    print("DEBUG: The number of attempts has been exhausted; an empty response is returned.")
+                    return None
+                
+                time.sleep(wait_time)
+
+        try:
+            return json.loads(response.text)
+        except json.JSONDecodeError:
+            print(f"DEBUG: failed to parse the response: {response.text[:300]}")
+            return None

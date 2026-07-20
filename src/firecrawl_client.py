@@ -105,12 +105,15 @@ class FirecrawlClient:
     # check again if there is multiple pages and how to get/scroll to next page,
     # in this case we should also return the html for ai to analize;
     # jakby co to ja piszę takie fajne kom nie ai slop
-    def _single_fetch(self,url: str, item: str, selector: str, wait_for: int = 3000) -> dict:
-        actions = [
-            {"type": "click", "selector": selector},
-            {"type": "write", "text": item},
-            {"type": "wait", "milliseconds": 1500}
-        ]
+    def _single_fetch(self,url: str, item: str, selectors: list, wait_for: int = 3000) -> dict:
+        actions = []
+
+        for s in selectors:
+            actions.append({"type": "click", "selector": s})
+            actions.append({"type": "wait", "milliseconds": 800})
+
+        actions.append({"type": "write", "text": item})
+        actions.append({"type": "wait", "milliseconds": 1500})
 
         result = self.app.scrape_url(
             url=url,
@@ -148,18 +151,28 @@ class FirecrawlClient:
             "metadata": result.metadata
         }
 
-    def fetch_filtered_data(self, url: str, selector: str, filter: dict, items_list: list) -> dict:
+    def fetch_filtered_data(self, url: str, selectors: list, filter: dict, items_list: list) -> dict:
         filtered_data = []
-        print(selector)
+        print(selectors)
 
         if filter["cardinality"]== "identifier":
             for item in items_list: 
-                result = self._single_fetch(url, item, selector)
+                result = self._single_fetch(url, item, selectors)
                 filtered_data.append(result)
         elif filter.get("bulk_search_supported"):
-            result = self._bulk_fetch(url, items_list, selector)
+            result = self._bulk_fetch(url, items_list, selectors)
             filtered_data.append(result)
         else:
             raise NotImplementedError("category filter handling not implemented yet")
 
         return filtered_data
+    
+    def fetch_with_given_actions(self, url: str, actions: list, wait_for: int = 3000):
+        result = self.app.scrape_url(
+            url=url,
+            formats=['html'],
+            wait_for=wait_for,
+            actions=actions
+        )
+
+        return {"html": result.html}    

@@ -28,9 +28,36 @@ class Orchestrator:
 
         return result
 
+    def resolve_selectors(self, url: str, analisys: dict, filter: dict, max_depth: int = 5) -> list:
+
+        if analisys["gate_needed"] and not analisys.get("target_selector"):
+            selectors = [analisys["gate_selector"]]
+
+            for i in range(1,max_depth):
+                actions = []
+
+                for s in selectors:
+                    actions.append({"type": "click", "selector": s})
+                    actions.append({"type": "wait", "milliseconds": 800})
+
+                data_to_search = self.firecrawl.fetch_with_given_actions(url, actions) # we have to go deeper
+                result = self.extractor.find_selector(selectors, filter, data_to_search["html"])
+
+                if result and result.get("selector"):
+                    selectors.append(result["selector"])
+                    if result.get("confidence") == "high" and not result.get("needs_more_depth", False):
+                        break
+                else:
+                    break
+
+            return selectors
+        
+        # making sure there won't be any "None"
+        selectors = [s for s in (analisys["gate_selector"], analisys["target_selector"]) if s]
+        return selectors
+
     def filtered_scraping(self, url: str, analisys: dict, page_sample_result: dict, csv_list: list[str], user_choice: str) -> dict:
        
-        selector = analisys["selector"]
         filter_options = page_sample_result.get("filter_options",[])
         available_fields = page_sample_result.get("available_fields", [])
 
@@ -58,8 +85,9 @@ class Orchestrator:
                     "cardinality": "category",
                     "example_values": None
                 }
-                
-        filtered_data = self.firecrawl.fetch_filtered_data(url, selector, filter, csv_list)
+        selectors = self.resolve_selectors(url, analisys, filter)
+
+        filtered_data = self.firecrawl.fetch_filtered_data(url, selectors, filter, csv_list)
 
         return filtered_data
 
