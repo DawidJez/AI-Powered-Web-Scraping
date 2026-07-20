@@ -592,6 +592,39 @@ class AIExtractor:
             Build the CSS selector using ONLY attributes LITERALLY present in the fragment
             (id, class, name, aria-label, data-* attributes, role). Never invent attributes
             not visibly present in the HTML.
+                              
+            # CRITICAL PRIORITY RULE - read this before answering
+            Web components (custom HTML tags containing a hyphen, e.g. <ti-search-field>,
+            <x-autocomplete>, <my-input>) frequently WRAP a real, functional input inside
+            their Shadow DOM, while a nearby "twin" plain <input> element in the light DOM
+            (same visual area, similar aria-label) is often a DISABLED, invisible, or
+            purely internal implementation detail belonging to an underlying grid/table
+            library (e.g. AG Grid's own floating filter row) - not the actual control the
+            user interacts with.
+
+            When you encounter BOTH of these in the same fragment or across fragments for
+            the same target field:
+            - a plain <input>/<select>/<button> that is disabled, zero-size, or otherwise
+            looks like an internal/hidden implementation detail, AND
+            - a custom web component (hyphenated tag name) with a visible "placeholder"
+            or similar user-facing attribute, positioned in the same area
+
+            You MUST choose the custom web component, even if its aria-label is less
+            obviously matching the target field name than the disabled input's aria-label.
+            A visible placeholder/label on the custom element referencing the target field
+            (even loosely, e.g. "Filter by product or part number" for a "Product number"
+            field) is sufficient evidence to prefer it. Matching aria-label text on a
+            disabled element is NEVER sufficient reason to choose it over a visible,
+            enabled custom component - disabled state always disqualifies an element
+            regardless of how well its label matches.
+
+            Build the selector for the custom element using its own tag name plus a
+            literally-present distinguishing attribute (e.g.
+            ti-search-field[placeholder='...']) - do NOT attempt to select something
+            inside its shadow DOM (no "shadowRoot", no descendant selectors assuming
+            access past the custom tag's boundary). The custom element itself, as a
+            single flat CSS selector, is the correct and complete answer - clicking it
+            is sufficient to reach its internal input.
 
             # What to avoid
             - Do not select a plain data-row link (<a>) that navigates to an unrelated page

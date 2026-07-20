@@ -154,6 +154,13 @@ class FirecrawlClient:
     def fetch_filtered_data(self, url: str, selectors: list, filter: dict, items_list: list) -> dict:
         filtered_data = []
         print(selectors)
+        """
+        selectors = [
+            "button[aria-label='Open Filter Menu']",
+            "ti-search-field[placeholder='Filter by product or part number']",
+        ]
+        print(selectors)
+        """
 
         if filter["cardinality"]== "identifier":
             for item in items_list: 
