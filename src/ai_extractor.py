@@ -211,6 +211,31 @@ class AIExtractor:
             column headers, filter panels, labeled values, or repeated patterns in the text.
             List only fields you actually observe evidence of - never invent plausible-sounding
             fields that are not backed by the content.
+            
+            IMPORTANT: A page's main table/grid header row (the row of column names
+            directly above the data rows) is the PRIMARY source of truth for
+            available_fields. A secondary "manage columns" or "column chooser" panel,
+            if present, is a SUPPLEMENTARY source used only to enrich or add fields -
+            never to exclude a field that already appears in the main header row.
+
+            Pinned/mandatory identifier columns (e.g. "Product number", "Part number",
+            "SKU", "Model number") are frequently excluded from "manage columns" panels
+            because the UI does not allow hiding them - this does NOT mean they lack a
+            filter. If such a field appears in the main header row and there is a
+            visible search/filter input anywhere on the page (even a generic search box
+            whose target is not explicitly labeled), assume it filters on that
+            identifier field and include it in filter_options with cardinality
+            "identifier".
+                              
+            When the main header row and the columns panel disagree, take the UNION of
+            both, never the intersection.
+                              
+            If a field name in the header row and a field name in the columns panel
+            appear to refer to the same underlying data (e.g. slightly different
+            labels for what is clearly the same column position/content), treat them
+            as one field using the header row's name - do not list both as separate
+            fields.
+                              
             3. Whether the page declares a total record count and/or a per-page record count
             (e.g. phrases like "396 results", "1 to 50 of 396", "Page 1 of 8"). Extract these
             numbers if present.
@@ -234,6 +259,16 @@ class AIExtractor:
             - "unknown": not enough evidence to tell
             List the filter names/categories you observed (e.g. "Subcategory", "Rating"),
             and example values if visible.
+                              
+            IMPORTANT: In grid/table layouts, it is common for EVERY column to have its
+            own filter (e.g. a floating filter input below each header, even if not
+            visually prominent, or a per-column entry in a "manage columns" panel with
+            filtering enabled). As a default assumption, treat every field listed in
+            available_fields as ALSO having a corresponding filter in filter_options,
+            unless you see clear evidence that a specific field does NOT have one. Do
+            not require strong/explicit proof of a filter's existence before including
+            it - the default expectation is that it exists.
+
             6. Whether the page offers a bulk/batch search feature - a way to submit multiple
             identifiers at once (e.g. "paste part numbers", "BOM search", "cross-reference
             tool", a multi-line text input for search terms). This is different from a normal
@@ -248,15 +283,7 @@ class AIExtractor:
             waiting for the user's next instruction (e.g. what to extract, or how to narrow
             things down) - even though you are not an autonomous agent and won't act on your
             own, a small friendly nod to "standing by" is welcome here.
-            
-            IMPORTANT: In grid/table layouts, it is common for EVERY column to have its own
-            filter (e.g. a floating filter input below each header, even if not visually
-            prominent). As a default assumption, treat every field listed in "available_fields"
-            as ALSO having a corresponding filter in "filter_options", unless you see clear
-            evidence that a specific field does NOT have one. Do not require strong/explicit
-            proof of a filter's existence before including it - the default expectation is that
-            it exists.
-
+                                                            
             # Rules
             - Base every answer strictly on evidence present in the provided content.
             - If something cannot be determined from this single page, use null or an empty
@@ -420,3 +447,45 @@ class AIExtractor:
         except json.JSONDecodeError:
             print(f"DEBUG: failed to parse the response: {response.text[:300]}")
             return {}
+        
+    def debug_ask_ai_about_products(self, firecrawl_result: dict):
+
+        prompt = f"""
+            Masz ponizej surowy markdown wygenerowany ze scrapowania strony
+            (moze byc pozlepiany, bez spacji, chaotyczny - to normalne po
+            automatycznym scrapowaniu, nie przejmuj sie formatowaniem).
+
+            To jest test/debug, nie potrzebuje structured JSON. Po prostu
+            powiedz mi luznym tekstem:
+
+            1. Czy widzisz tu liste produktow / product numberow? Ile ich
+            widac w tym fragmencie?
+            2. Wypisz WSZYSTKIE product number / kody produktow ktore
+            znajdziesz (nawet jesli sa pozlepiane z innym tekstem bez spacji -
+            wypisz je oddzielnie mimo to).
+            3. Czy widzisz cokolwiek co wyglada na filtr po ktorym tekst
+            zostal juz przefiltrowany (np. wpisana fraza w polu wyszukiwania,
+            ktora ograniczyla liste)?
+            4. Czy cos wyglada podejrzanie / ucietego / zepsutego w tym
+            markdownie?
+
+            Content:
+            ---
+            {firecrawl_result}
+            ---
+        """
+
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=[f"Prompt:\n{prompt}"],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json"
+            )
+        )
+
+        print("=" * 60)
+        print("DEBUG: AI response:")
+        print("=" * 60)
+        print(response.text)
+
+        return response.text

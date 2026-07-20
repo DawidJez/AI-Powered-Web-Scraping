@@ -110,8 +110,8 @@ class Orchestrator:
         start_test = time.time()
         print("DEBUG: Start testu")
 
-        with open("data/test_files/test_page_sample.txt", "r", encoding="utf-8") as f:
-            test_content = f.read()
+        #with open("data/test_files/test_page_sample.txt", "r", encoding="utf-8") as f:
+        #    test_content = f.read()
         
         #result = {
         #    "markdown_result": "",
@@ -133,6 +133,7 @@ class Orchestrator:
         #"""
         start_filter = time.time()
         filtered_data = self.filtered_scraping(url, analisys, result["page_sample_result"], csv_list, user_choice)
+        ai_filtered_data = self.extractor.debug_ask_ai_about_products(filtered_data)
         #selector = "input[aria-label='Product number Filter Input']"
         #filter = {
         #    "name": "Product number",
@@ -163,5 +164,5 @@ class Orchestrator:
         # print(f"\nDEBUG: result = \n{result}")
         print(f"DEBUG: sample page result = \n{result["page_sample_result"]}")
         print(f"DEBUG: analisys result = \n{analisys}")
-        print(f"DEBUG: filtered data result = \n{filtered_data}")
+        print(f"DEBUG: filtered data result = \n{ai_filtered_data}")
         return 1
