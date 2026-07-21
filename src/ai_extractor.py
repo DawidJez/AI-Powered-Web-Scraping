@@ -2,6 +2,7 @@ from google import genai
 from google.genai import types
 from google.genai import errors
 import os
+import re
 import json
 from bs4 import BeautifulSoup
 import time
@@ -40,7 +41,109 @@ class AIExtractor:
             start_idx = idx + len(search_term)
 
         return windows
+    """
+    # one thing to keep in mind is to check wether key words like "Status"/"Type" etc. 
+    # are being properly found and if whole html isn't returned by mistake 
+    # because of number of occurrences
+    def _extract_html_windows(self, html: str, search_term: str, window_size: int = 3000, proximity: int = 100) -> list[dict]:
+        soup = BeautifulSoup(html, "html.parser")
 
+        for trash_tag in soup(["script", "style"]):
+            trash_tag.decompose()
+
+        clean_html = soup.prettify()
+        clean_html_lc = clean_html.lower()
+
+        print(f"DEBUG: clean_html length = {len(clean_html)}")
+
+        # words that we will search in html
+        words = re.findall(r"[a-zA-Z0-9]+", search_term.lower())
+        stopwords = {"of", "the", "a", "an", "and", "or", "in", "on", "for", "to", "by"} # mess
+        significant_words = [w for w in words if w not in stopwords and len(w) > 1]
+
+        if not significant_words:
+            significant_words = words # fallback
+
+        print(f"DEBUG: significant_words = {significant_words}")
+
+        hits = []  # list of (position, word)
+
+        for word in significant_words:
+            start_idx = 0
+
+            while True:
+                idx = clean_html_lc.find(word, start_idx)
+                if idx == -1:
+                    break
+
+                hits.append((idx, word))
+                start_idx = idx + len(word)
+
+        print(f"DEBUG: total raw hits = {len(hits)}")
+        for word in significant_words:
+            count = sum(1 for _, w in hits if w == word)
+            print(f"DEBUG:   '{word}' occurred {count} times")
+
+        if not hits:
+            return []
+
+        hits.sort(key=lambda h: h[0])
+
+        unique_words_needed = 1 if len(significant_words) == 1 else 2
+        print(f"DEBUG: unique_words_needed = {unique_words_needed}, proximity = {proximity}")
+
+        cluster_centers = []
+        left = 0
+
+        for right in range(len(hits)):
+            while hits[right][0] - hits[left][0] > proximity:
+                left += 1
+
+            window_words = {w for _, w in hits[left:right + 1]}
+            if len(window_words) >= unique_words_needed:
+                cluster_centers.append(hits[right][0])
+
+        print(f"DEBUG: cluster_centers found (proximity match) = {len(cluster_centers)}")
+
+        if not cluster_centers:
+            word_counts = {}
+            for _, w in hits:
+                word_counts[w] = word_counts.get(w, 0) + 1
+            rarest_word = min(word_counts, key=word_counts.get)
+            cluster_centers = [pos for pos, w in hits if w == rarest_word]
+            print(f"DEBUG: FALLBACK triggered, using rarest word '{rarest_word}' -> {len(cluster_centers)} positions")
+
+        raw_hits = sorted(set(cluster_centers))
+        print(f"DEBUG: unique cluster_center positions = {len(raw_hits)}")
+
+        ranges = []
+        for idx in raw_hits:
+            start_idx = max(0, idx - window_size)
+            end_idx = min(len(clean_html), idx + window_size)
+            ranges.append([start_idx, end_idx])
+
+        ranges.sort(key=lambda r: r[0])
+        merged = [ranges[0]]
+        for start, end in ranges[1:]:
+            if start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+
+        print(f"DEBUG: ranges before merge = {len(ranges)}, after merge = {len(merged)}")
+        for i, (s, e) in enumerate(merged):
+            print(f"DEBUG:   merged window {i}: [{s}:{e}] = {e - s} chars")
+
+        windows = [
+            {"occurrence_index": i, "fragment": clean_html[start:end]}
+            for i, (start,end) in enumerate(merged)
+        ]
+
+        total_len = sum(len(w["fragment"]) for w in windows)
+        print(f"DEBUG: TOTAL windows = {len(windows)}, TOTAL chars across all windows = {total_len}")
+
+        return windows
+    """
     def _chunk_segmentation(self, load: str, chunk_size: int, overlap: int = 2000) -> list[str]:
         chunks = []
         start = 0
@@ -364,6 +467,9 @@ class AIExtractor:
             f"--- Occurrence {w['occurrence_index']} ---\n{w['fragment']}"
             for w in html_windows
         )
+        print(len(combined_windows))
+        if len(combined_windows) > 150000:
+            raise ValueError("DEBUG: MAYDAY we got a problem with length")
         
         system_instruction = ("""
             # Role

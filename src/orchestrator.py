@@ -33,7 +33,7 @@ class Orchestrator:
         if analisys["gate_needed"] and not analisys.get("target_selector"):
             selectors = [analisys["gate_selector"]]
 
-            for i in range(1,max_depth):
+            for _ in range(1,max_depth):
                 actions = []
 
                 for s in selectors:
@@ -43,11 +43,18 @@ class Orchestrator:
                 data_to_search = self.firecrawl.fetch_with_given_actions(url, actions) # we have to go deeper
                 result = self.extractor.find_selector(selectors, filter, data_to_search["html"])
 
-                if result and result.get("selector"):
-                    selectors.append(result["selector"])
-                    if result.get("confidence") == "high" and not result.get("needs_more_depth", False):
-                        break
-                else:
+                if not result or not result.get("selector"):
+                    print("DEBUG: AI nie znalazlo nic, przerywam petle")
+                    break
+
+                candidate = result["selector"]
+
+                if candidate in selectors:
+                    print(f"DEBUG: AI zwrocilo ten sam selector co juz mamy ('{candidate}') - utkneliśmy, przerywam")
+                    break
+
+                selectors.append(result["selector"])
+                if not result.get("needs_more_depth", False):
                     break
 
             return selectors
@@ -92,7 +99,7 @@ class Orchestrator:
         return filtered_data
 
     def test(self):
-        url = "https://www.ti.com/product-category/sensors/products.html"
+        url = "https://www.vishay.com/en/mosfets/"
         user_prompt = f"""
             You are given a list of MPNs called "csv_list".
 
@@ -149,9 +156,14 @@ class Orchestrator:
         start_sample = time.time()
         result = self.page_sample(url)
         end_sample = time.time()
-        
-        print(f"DEBUG: sample page result = \n{result["page_sample_result"]}")
+
+        rezultat = result["page_sample_result"]
+        only_filters = rezultat["available_fields"]
+        only_products = rezultat["filter_options"]
+
+        print(f"DEBUG: sample page result = \n{only_filters, only_products}")
         user_choice = input("Enter your choice: ").strip()
+
         #csv_list = ["TMP75","TMP117","TMP275"]
         csv_list = ["TMP117"]
 
