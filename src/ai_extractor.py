@@ -525,6 +525,31 @@ class AIExtractor:
             class, name, aria-label, data-* attributes, role). Never invent attributes not
             visibly present.
 
+            # MULTIPLE OPTIONS MODE - important for category-type fields
+            If "interaction_type" is "click_checkbox", "click_option", or "select_dropdown"
+            (i.e. the field works by picking ONE value out of SEVERAL selectable options,
+            rather than typing free text), do NOT just pick and return a single target_selector.
+            Instead:
+
+            - Find ALL individual selectable options for this field visible in the fragments
+              (e.g. every checkbox in the group, every <option> in a dropdown, every radio
+              in the set) - not just one example.
+            - For each option, report its human-readable value/label (the text or attribute
+              that identifies WHICH choice this is, e.g. "ACTIVE", "PREVIEW", a subcategory
+              name) and a CSS selector built ONLY from attributes literally present on that
+              specific option's element (never invent attributes, and never build a shared
+              template - each option gets its own concrete, literal selector).
+            - Populate "available_options" as a list of {"value": ..., "selector": ...}
+              pairs, one per option found. Leave "target_selector" null in this case -
+              "available_options" is the source of truth instead.
+            - If only a partial set of options is visible in these fragments (e.g. the panel
+              might have more options below a scroll boundary not captured here), still
+              report what you see, and note this limitation in "evidence".
+
+            For "type" interactions (free-text input, no discrete option list), ignore this
+            section entirely and just return a single "target_selector" as before -
+            "available_options" should be an empty list in that case.
+
             CRITICAL: Never select an element that has a "disabled" attribute, or that appears
             to be a hidden/internal implementation detail (e.g. zero-size, aria-hidden, or part
             of a data-grid's internal filter row that isn't the page's actual visible search
@@ -534,7 +559,8 @@ class AIExtractor:
             visible custom element instead. Explain this reasoning in "evidence" if relevant.
 
             If NONE of the fragments look like a real filter control (field-specific or gate),
-            return null for both selectors and explain why in "evidence".
+            return null for both selectors, empty list for "available_options", and explain why
+            in "evidence".
 
             # Response Format
             Return only valid JSON:
@@ -543,6 +569,7 @@ class AIExtractor:
             "gate_selector": string or null,
             "gate_needed": boolean,
             "target_selector": string or null,
+            "available_options": [{"value": string, "selector": string}, ...],
             "interaction_type": "type" | "click_checkbox" | "click_option" | "select_dropdown" | "unknown",
             "confidence": "high" | "low" | "none",
             "evidence": string
@@ -658,6 +685,13 @@ class AIExtractor:
             clicking the field name row/label opens a SUB-panel with the field's actual options
             (checkboxes, a search input, a range slider). Other times, the field name occurrence
             already IS or directly precedes the final interactive control.
+                              
+            # History awareness
+            You will be given the list of selectors already clicked in previous steps of this
+            same discovery process. Do NOT return a selector identical or equivalent to one
+            already in that list - if the fresh HTML still only shows the same element you
+            already clicked, that means it led nowhere useful; look harder for a genuinely
+            different/deeper element, or return "none" if truly nothing new is present.
 
             # Task
             Review the provided fragments (each labeled with occurrence_index) and determine:
@@ -698,6 +732,31 @@ class AIExtractor:
             Build the CSS selector using ONLY attributes LITERALLY present in the fragment
             (id, class, name, aria-label, data-* attributes, role). Never invent attributes
             not visibly present in the HTML.
+
+            # MULTIPLE OPTIONS MODE - important for category-type fields
+            If "control_type" is "final_control" AND "interaction_type" is "click_checkbox",
+            "click_option", or "select_dropdown" (i.e. the field works by picking ONE value
+            out of SEVERAL selectable options, rather than typing free text), do NOT just
+            pick and return a single selector. Instead:
+
+            - Find ALL individual selectable options for this field visible in the fragments
+              (e.g. every checkbox in the group, every <option> in a dropdown, every radio
+              in the set) - not just one example.
+            - For each option, report its human-readable value/label (the text or attribute
+              that identifies WHICH choice this is, e.g. "ACTIVE", "PREVIEW", a subcategory
+              name) and a CSS selector built ONLY from attributes literally present on that
+              specific option's element (never invent attributes, and never build a shared
+              template - each option gets its own concrete, literal selector).
+            - Populate "available_options" as a list of {"value": ..., "selector": ...}
+              pairs, one per option found. Leave "selector" (the single top-level field)
+              null in this case - "available_options" is the source of truth instead.
+            - If only a partial set of options is visible in these fragments (e.g. the panel
+              might have more options below a scroll boundary not captured here), still
+              report what you see, and note this limitation in "evidence".
+
+            For "type" interactions (free-text input, no discrete option list), ignore this
+            section entirely and just return a single "selector" as before - "available_options"
+            should be an empty list in that case.
                               
             # CRITICAL PRIORITY RULE - read this before answering
             Web components (custom HTML tags containing a hyphen, e.g. <ti-search-field>,
@@ -746,13 +805,15 @@ class AIExtractor:
             a "for" attribute pointing to it - then the label itself is a valid choice).
 
             If nothing usable is found across all fragments, return null for "selector",
-            "none" for "control_type", false for "needs_more_depth", and explain in "evidence".
+            "none" for "control_type", false for "needs_more_depth", empty list for
+            "available_options", and explain in "evidence".
 
             # Response Format
             Return only valid JSON:
             {
             "chosen_occurrence_index": integer or null,
             "selector": string or null,
+            "available_options": [{"value": string, "selector": string}, ...],
             "control_type": "final_control" | "intermediate_step" | "none",
             "needs_more_depth": boolean,
             "interaction_type": "type" | "click_checkbox" | "click_option" | "click_expand" | "select_dropdown" | "unknown",
@@ -760,13 +821,20 @@ class AIExtractor:
             "evidence": string
             }
         """)
+        history_block = ""
+        if selectors:
+            history_block = "Already-clicked selectors so far (in order): " + " -> ".join(selectors)
 
         response = None
         for attempt in range(1, max_retries + 1):
             try:
                 response = self.client.models.generate_content(
                     model=self.model,
-                    contents=[f"Target label: {search_term}\n\nHTML fragment:\n{combined_windows}"],
+                    contents=[
+                        f"Target label: {search_term}\n\n"
+                        f"{history_block}\n\n"
+                        f"HTML fragment:\n{combined_windows}"
+                    ],
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
                         response_mime_type="application/json"

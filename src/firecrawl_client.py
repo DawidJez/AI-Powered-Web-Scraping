@@ -3,6 +3,7 @@ import re
 from firecrawl import FirecrawlApp
 from dotenv import load_dotenv
 import os
+import difflib
 
 load_dotenv()
 
@@ -128,6 +129,7 @@ class FirecrawlClient:
             "metadata": result.metadata
         }
     
+    # selector str to change -> selectors list
     def _bulk_fetch(self,url: str, item_list: list, selector: str, wait_for: int = 3000) -> dict:
         separator: str = ", "
         text_list = separator.join(item_list)
@@ -150,10 +152,46 @@ class FirecrawlClient:
             "links": result.links,
             "metadata": result.metadata
         }
+    
+    def _resolve_choosen_option(self, available_options: list, wanted_value: str):
+        values = [opt["value"] for opt in available_options]
+        match = difflib.get_close_matches(wanted_value, values, n=1, cutoff=0.4)
 
-    def fetch_filtered_data(self, url: str, selectors: list, filter: dict, items_list: list) -> dict:
+        if not match:
+            return None
+        
+        matched_value = match[0]
+        return next(o["selector"] for o in available_options if o["value"] == matched_value)
+    
+    def _category_fetch(self, url: str, gate_selectors: list, choosen_selector: str, wait_for: int = 3000) -> dict:
+        if not choosen_selector:
+            raise ValueError(f"DEBUG: brak choosen_options, nie ma z czego wybrac dla '{choosen_selector}'")
+        
+        actions = []
+        for s in gate_selectors:
+            actions.append({"type": "click", "selector": s})
+            actions.append({"type": "wait", "milliseconds": 800})
+    
+        actions.append({"type": "click", "selector": choosen_selector})
+        actions.append({"type": "wait", "milliseconds": 1500})
+
+        result = self.app.scrape_url(
+            url=url,
+            formats=['markdown', 'links'],
+            wait_for=wait_for,
+            actions=actions
+        )
+
+        return {
+            "records": result.markdown,
+            "links": result.links,
+            "metadata": result.metadata
+        }
+
+    def fetch_filtered_data(self, url: str, resolved: list, filter: dict, items_list: list, available_options: list) -> dict:
         filtered_data = []
-        print(selectors)
+
+        selectors = resolved["gate_selectors"]
         """
         selectors = [
             "button[aria-label='Open Filter Menu']",
@@ -166,11 +204,22 @@ class FirecrawlClient:
             for item in items_list: 
                 result = self._single_fetch(url, item, selectors)
                 filtered_data.append(result)
+
         elif filter.get("bulk_search_supported"):
             result = self._bulk_fetch(url, items_list, selectors)
             filtered_data.append(result)
+
+        elif filter["cardinality"]== "category":
+            for value in items_list:
+                choosen_selector = self._resolve_choosen_option(available_options, value)
+
+                #raise SystemError("DEBUG: Wanted selectors: #P7000 + coś, received selectors: " + ", ".join(selectors) + " and choosen selector " + choosen_selector)
+            
+                result = result = self._category_fetch(url, selectors, choosen_selector)
+
+                filtered_data.append(result)
         else:
-            raise NotImplementedError("category filter handling not implemented yet")
+            raise NotImplementedError("unrecognized filter cardinality")
 
         return filtered_data
     

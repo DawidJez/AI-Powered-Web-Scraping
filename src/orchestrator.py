@@ -32,6 +32,7 @@ class Orchestrator:
 
         if analisys["gate_needed"] and not analisys.get("target_selector"):
             selectors = [analisys["gate_selector"]]
+            last_result = None # out target selector
 
             for _ in range(1,max_depth):
                 actions = []
@@ -54,14 +55,24 @@ class Orchestrator:
                     break
 
                 selectors.append(result["selector"])
+                last_result = result
+
                 if not result.get("needs_more_depth", False):
                     break
 
-            return selectors
+            return {
+                "gate_selectors": selectors,
+                "available_options": last_result.get("available_options"),
+                "interaction_type": last_result.get("interaction_type")
+            }
         
         # making sure there won't be any "None"
         selectors = [s for s in (analisys["gate_selector"], analisys["target_selector"]) if s]
-        return selectors
+        return {
+            "gate_selectors": selectors,
+            "available_options": analisys.get("available_options"),
+            "interaction_type": analisys.get("interaction_type")
+        }
 
     def filtered_scraping(self, url: str, analisys: dict, page_sample_result: dict, csv_list: list[str], user_choice: str) -> dict:
        
@@ -92,9 +103,9 @@ class Orchestrator:
                     "cardinality": "category",
                     "example_values": None
                 }
-        selectors = self.resolve_selectors(url, analisys, filter)
+        resolved = self.resolve_selectors(url, analisys, filter)
 
-        filtered_data = self.firecrawl.fetch_filtered_data(url, selectors, filter, csv_list)
+        filtered_data = self.firecrawl.fetch_filtered_data(url, resolved, filter, csv_list, resolved["available_options"])
 
         return filtered_data
 
@@ -162,10 +173,11 @@ class Orchestrator:
         only_products = rezultat["filter_options"]
 
         print(f"DEBUG: sample page result = \n{only_filters, only_products}")
-        user_choice = input("Enter your choice: ").strip()
+        # user_choice = input("Enter your choice: ").strip()
 
         #csv_list = ["TMP75","TMP117","TMP275"]
-        csv_list = ["TMP117"]
+        user_choice = "Configuration"
+        csv_list = ["DUAL"]
 
         start_analisys = time.time()
         analisys = self.search_for_filters(result["html_to_analize"], user_choice)
