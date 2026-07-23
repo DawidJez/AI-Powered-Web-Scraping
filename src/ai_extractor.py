@@ -467,9 +467,9 @@ class AIExtractor:
         if not html_windows:
             return {
                 "chosen_occurrence_index": None,
-                "gate_selector": None,
+                "gate_script": None,
                 "gate_needed": False,
-                "target_selector": None,
+                "target_script": None,
                 "available_options": [],
                 "interaction_type": "unknown",
                 "confidence": "none",
@@ -522,11 +522,11 @@ class AIExtractor:
             field, determine:
 
             1. Is there a fragment showing the field's OWN interactable control? If yes, that's
-            your target_selector.
+            your target_script.
             2. Does reaching that control require first clicking a gate (a menu/panel opener)?
-            If a gate fragment is visible, report its selector separately in "gate_selector".
+            If a gate fragment is visible, report its script separately in "gate_script".
             If the field's control is already directly visible/interactable with no gate
-            needed, set "gate_selector" to null.
+            needed, set "gate_script" to null.
             3. What TYPE of interaction does the target control need once reachable?
             - "type": a text input where you type a value
             - "click_checkbox": a checkbox/toggle to click for a specific value
@@ -534,33 +534,57 @@ class AIExtractor:
             - "select_dropdown": a <select> or dropdown-style element
             - "unknown": control type unclear from the fragment
 
-            Build CSS selectors using ONLY attributes LITERALLY present in the fragments (id,
-            class, name, aria-label, data-* attributes, role). Never invent attributes not
-            visibly present.
+            # How to write the scripts
+            Instead of a CSS selector, write a short, standalone JavaScript snippet that finds
+            and interacts with the element directly. This snippet will be executed via a
+            browser's executeJavascript action - it runs in the actual page context, so
+            `document` is available directly.
+
+            Use whatever combination of these is needed to reliably identify the element:
+            - document.querySelector / querySelectorAll with real CSS (id, class, attributes)
+            - Text matching where labels aren't cleanly attached via attributes, e.g.:
+            [...document.querySelectorAll('SOME_CONTAINER_SELECTOR')]
+                .find(el => el.textContent.includes('TARGET TEXT'))
+            - .closest(...) to walk up from a matched text node to its actual clickable ancestor
+            - For shadow DOM elements (custom tags with a hyphen in the name, e.g.
+            <ti-search-field>), access shadow content explicitly via
+            `.shadowRoot.querySelector(...)` - never assume a plain descendant CSS selector
+            can reach inside a shadow root.
+
+            The snippet's final statement must actually perform the interaction (e.g. end with
+            `.click()` or `.focus()`), not just locate the element.
+
+            NEVER use jQuery-style pseudo-selectors like :contains(), :has-text(), :eq() -
+            these are not valid CSS/JS and will throw a runtime error. Use .textContent.includes(...)
+            or similar plain JS instead of any pseudo-selector text matching.
+
+            For "type" interactions specifically: the script should ONLY focus or click the
+            input element to activate it (e.g. `document.querySelector('...').focus();`).
+            Do NOT attempt to set .value or simulate typing in the script - actual text entry
+            is handled by a separate step after this script runs.
 
             # MULTIPLE OPTIONS MODE - important for category-type fields
             If "interaction_type" is "click_checkbox", "click_option", or "select_dropdown"
             (i.e. the field works by picking ONE value out of SEVERAL selectable options,
-            rather than typing free text), do NOT just pick and return a single target_selector.
+            rather than typing free text), do NOT just pick and return a single target_script.
             Instead:
 
             - Find ALL individual selectable options for this field visible in the fragments
-              (e.g. every checkbox in the group, every <option> in a dropdown, every radio
-              in the set) - not just one example.
+            (e.g. every checkbox in the group, every <option> in a dropdown, every radio
+            in the set) - not just one example.
             - For each option, report its human-readable value/label (the text or attribute
-              that identifies WHICH choice this is, e.g. "ACTIVE", "PREVIEW", a subcategory
-              name) and a CSS selector built ONLY from attributes literally present on that
-              specific option's element (never invent attributes, and never build a shared
-              template - each option gets its own concrete, literal selector).
-            - Populate "available_options" as a list of {"value": ..., "selector": ...}
-              pairs, one per option found. Leave "target_selector" null in this case -
-              "available_options" is the source of truth instead.
+            that identifies WHICH choice this is, e.g. "ACTIVE", "PREVIEW", a subcategory
+            name) and a JS snippet (following the same rules above) that clicks/selects
+            that SPECIFIC option only - never a shared template with a placeholder.
+            - Populate "available_options" as a list of {"value": ..., "script": ...}
+            pairs, one per option found. Leave "target_script" null in this case -
+            "available_options" is the source of truth instead.
             - If only a partial set of options is visible in these fragments (e.g. the panel
-              might have more options below a scroll boundary not captured here), still
-              report what you see, and note this limitation in "evidence".
+            might have more options below a scroll boundary not captured here), still
+            report what you see, and note this limitation in "evidence".
 
             For "type" interactions (free-text input, no discrete option list), ignore this
-            section entirely and just return a single "target_selector" as before -
+            section entirely and just return a single "target_script" as before -
             "available_options" should be an empty list in that case.
 
             CRITICAL: Never select an element that has a "disabled" attribute, or that appears
@@ -572,17 +596,17 @@ class AIExtractor:
             visible custom element instead. Explain this reasoning in "evidence" if relevant.
 
             If NONE of the fragments look like a real filter control (field-specific or gate),
-            return null for both selectors, empty list for "available_options", and explain why
+            return null for both scripts, empty list for "available_options", and explain why
             in "evidence".
 
             # Response Format
             Return only valid JSON:
             {
             "chosen_occurrence_index": integer or null,
-            "gate_selector": string or null,
+            "gate_script": string or null,
             "gate_needed": boolean,
-            "target_selector": string or null,
-            "available_options": [{"value": string, "selector": string}, ...],
+            "target_script": string or null,
+            "available_options": [{"value": string, "script": string}, ...],
             "interaction_type": "type" | "click_checkbox" | "click_option" | "select_dropdown" | "unknown",
             "confidence": "high" | "low" | "none",
             "evidence": string
@@ -667,14 +691,14 @@ class AIExtractor:
 
         return response.text
     
-    def find_selector(self, selectors: list, filter: dict, html: str, max_retries: int = 3) -> dict:
+    def find_script(self, scripts: list, filter: dict, html: str, max_retries: int = 3) -> dict:
         """we take the filter["name"] so llm will know what its actually looking for"""
 
         search_term = filter["name"]
         html_windows = self._extract_html_windows(html, search_term)
 
         if not html_windows:
-            return {"selector": None, "confidence": "none", "evidence": "text not found in HTML"}
+            return {"script": None, "confidence": "none", "evidence": "text not found in HTML"}
         
         combined_windows = "\n\n".join(
             f"--- Occurrence {w['occurrence_index']} ---\n{w['fragment']}"
@@ -698,13 +722,6 @@ class AIExtractor:
             clicking the field name row/label opens a SUB-panel with the field's actual options
             (checkboxes, a search input, a range slider). Other times, the field name occurrence
             already IS or directly precedes the final interactive control.
-                              
-            # History awareness
-            You will be given the list of selectors already clicked in previous steps of this
-            same discovery process. Do NOT return a selector identical or equivalent to one
-            already in that list - if the fresh HTML still only shows the same element you
-            already clicked, that means it led nowhere useful; look harder for a genuinely
-            different/deeper element, or return "none" if truly nothing new is present.
 
             # Task
             Review the provided fragments (each labeled with occurrence_index) and determine:
@@ -742,35 +759,59 @@ class AIExtractor:
             - "select_dropdown": a <select> or dropdown-style element
             - "unknown": type unclear from the fragment
 
-            Build the CSS selector using ONLY attributes LITERALLY present in the fragment
-            (id, class, name, aria-label, data-* attributes, role). Never invent attributes
-            not visibly present in the HTML.
+            # How to write the script
+            Instead of a CSS selector, write a short, standalone JavaScript snippet that finds
+            and interacts with the chosen element directly. This snippet will be executed via a
+            browser's executeJavascript action - it runs in the actual page context, so
+            `document` is available directly.
+
+            Use whatever combination of these is needed to reliably identify the element:
+            - document.querySelector / querySelectorAll with real CSS (id, class, attributes)
+            - Text matching where labels aren't cleanly attached via attributes, e.g.:
+            [...document.querySelectorAll('SOME_CONTAINER_SELECTOR')]
+                .find(el => el.textContent.includes('TARGET TEXT'))
+            - .closest(...) to walk up from a matched text node to its actual clickable ancestor
+            - For shadow DOM elements (custom tags with a hyphen in the name, e.g.
+            <ti-search-field>), access shadow content explicitly via
+            `.shadowRoot.querySelector(...)` - never assume a plain descendant CSS selector
+            can reach inside a shadow root.
+
+            The snippet's final statement must actually perform the interaction (e.g. end with
+            `.click()` or `.focus()`), not just locate the element.
+
+            NEVER use jQuery-style pseudo-selectors like :contains(), :has-text(), :eq() -
+            these are not valid CSS/JS and will throw a runtime error. Use .textContent.includes(...)
+            or similar plain JS instead of any pseudo-selector text matching.
+
+            For "type" interactions specifically: the script should ONLY focus or click the
+            input element to activate it (e.g. `document.querySelector('...').focus();`).
+            Do NOT attempt to set .value or simulate typing in the script - actual text entry
+            is handled by a separate step after this script runs.
 
             # MULTIPLE OPTIONS MODE - important for category-type fields
             If "control_type" is "final_control" AND "interaction_type" is "click_checkbox",
             "click_option", or "select_dropdown" (i.e. the field works by picking ONE value
             out of SEVERAL selectable options, rather than typing free text), do NOT just
-            pick and return a single selector. Instead:
+            pick and return a single script. Instead:
 
             - Find ALL individual selectable options for this field visible in the fragments
-              (e.g. every checkbox in the group, every <option> in a dropdown, every radio
-              in the set) - not just one example.
+            (e.g. every checkbox in the group, every <option> in a dropdown, every radio
+            in the set) - not just one example.
             - For each option, report its human-readable value/label (the text or attribute
-              that identifies WHICH choice this is, e.g. "ACTIVE", "PREVIEW", a subcategory
-              name) and a CSS selector built ONLY from attributes literally present on that
-              specific option's element (never invent attributes, and never build a shared
-              template - each option gets its own concrete, literal selector).
-            - Populate "available_options" as a list of {"value": ..., "selector": ...}
-              pairs, one per option found. Leave "selector" (the single top-level field)
-              null in this case - "available_options" is the source of truth instead.
+            that identifies WHICH choice this is, e.g. "ACTIVE", "PREVIEW", a subcategory
+            name) and a JS snippet (following the same rules above) that clicks/selects
+            that SPECIFIC option only - never a shared template with a placeholder.
+            - Populate "available_options" as a list of {"value": ..., "script": ...}
+            pairs, one per option found. Leave "script" (the single top-level field)
+            null in this case - "available_options" is the source of truth instead.
             - If only a partial set of options is visible in these fragments (e.g. the panel
-              might have more options below a scroll boundary not captured here), still
-              report what you see, and note this limitation in "evidence".
+            might have more options below a scroll boundary not captured here), still
+            report what you see, and note this limitation in "evidence".
 
             For "type" interactions (free-text input, no discrete option list), ignore this
-            section entirely and just return a single "selector" as before - "available_options"
+            section entirely and just return a single "script" as before - "available_options"
             should be an empty list in that case.
-                              
+
             # CRITICAL PRIORITY RULE - read this before answering
             Web components (custom HTML tags containing a hyphen, e.g. <ti-search-field>,
             <x-autocomplete>, <my-input>) frequently WRAP a real, functional input inside
@@ -796,13 +837,11 @@ class AIExtractor:
             enabled custom component - disabled state always disqualifies an element
             regardless of how well its label matches.
 
-            Build the selector for the custom element using its own tag name plus a
-            literally-present distinguishing attribute (e.g.
-            ti-search-field[placeholder='...']) - do NOT attempt to select something
-            inside its shadow DOM (no "shadowRoot", no descendant selectors assuming
-            access past the custom tag's boundary). The custom element itself, as a
-            single flat CSS selector, is the correct and complete answer - clicking it
-            is sufficient to reach its internal input.
+            Write the script targeting the custom element directly by its own tag name plus
+            a literally-present distinguishing attribute (e.g.
+            document.querySelector("ti-search-field[placeholder='...']").focus()) - do NOT
+            attempt to reach inside its shadow DOM unless the fragment shows you need to
+            (see shadow DOM guidance above).
 
             # What to avoid
             - Do not select a plain data-row link (<a>) that navigates to an unrelated page
@@ -817,7 +856,7 @@ class AIExtractor:
             text node, unless the label is what's clickable (e.g. wraps the input or has
             a "for" attribute pointing to it - then the label itself is a valid choice).
 
-            If nothing usable is found across all fragments, return null for "selector",
+            If nothing usable is found across all fragments, return null for "script",
             "none" for "control_type", false for "needs_more_depth", empty list for
             "available_options", and explain in "evidence".
 
@@ -825,8 +864,8 @@ class AIExtractor:
             Return only valid JSON:
             {
             "chosen_occurrence_index": integer or null,
-            "selector": string or null,
-            "available_options": [{"value": string, "selector": string}, ...],
+            "script": string or null,
+            "available_options": [{"value": string, "script": string}, ...],
             "control_type": "final_control" | "intermediate_step" | "none",
             "needs_more_depth": boolean,
             "interaction_type": "type" | "click_checkbox" | "click_option" | "click_expand" | "select_dropdown" | "unknown",
@@ -835,8 +874,8 @@ class AIExtractor:
             }
         """)
         history_block = ""
-        if selectors:
-            history_block = "Already-clicked selectors so far (in order): " + " -> ".join(selectors)
+        if scripts:
+            history_block = "Already-clicked scripts so far (in order): " + " -> ".join(scripts)
 
         response = None
         for attempt in range(1, max_retries + 1):

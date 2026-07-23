@@ -45,7 +45,7 @@ class FirecrawlClient:
             actions = []
         
             for _ in range(page_num):
-                actions.append({"type": "click", "selector": id_term})
+                actions.append({"type": "executeJavasript", "script": id_term})
                 actions.append({"type": "wait", "milliseconds": 800})
 
             result = self.app.scrape_url(
@@ -106,11 +106,11 @@ class FirecrawlClient:
     # check again if there is multiple pages and how to get/scroll to next page,
     # in this case we should also return the html for ai to analize;
     # jakby co to ja piszę takie fajne kom nie ai slop
-    def _single_fetch(self,url: str, item: str, selectors: list, wait_for: int = 3000) -> dict:
+    def _single_fetch(self,url: str, item: str, scripts: list, wait_for: int = 3000) -> dict:
         actions = []
 
-        for s in selectors:
-            actions.append({"type": "click", "selector": s})
+        for s in scripts:
+            actions.append({"type": "executeJavascript", "script": s})
             actions.append({"type": "wait", "milliseconds": 800})
 
         actions.append({"type": "write", "text": item})
@@ -129,13 +129,13 @@ class FirecrawlClient:
             "metadata": result.metadata
         }
     
-    # selector str to change -> selectors list
-    def _bulk_fetch(self,url: str, item_list: list, selector: str, wait_for: int = 3000) -> dict:
+    # script str to change -> scripts list
+    def _bulk_fetch(self,url: str, item_list: list, script: str, wait_for: int = 3000) -> dict:
         separator: str = ", "
         text_list = separator.join(item_list)
 
         actions = [
-            {"type": "click", "selector": selector},
+            {"type": "executeJavascript", "script": script},
             {"type": "write", "text": text_list},
             {"type": "wait", "milliseconds": 1500}
         ]
@@ -161,18 +161,18 @@ class FirecrawlClient:
             return None
         
         matched_value = match[0]
-        return next(o["selector"] for o in available_options if o["value"] == matched_value)
+        return next(o["script"] for o in available_options if o["value"] == matched_value)
     
-    def _category_fetch(self, url: str, gate_selectors: list, choosen_selector: str, wait_for: int = 3000) -> dict:
-        if not choosen_selector:
-            raise ValueError(f"DEBUG: brak choosen_options, nie ma z czego wybrac dla '{choosen_selector}'")
+    def _category_fetch(self, url: str, gate_scripts: list, choosen_script: str, wait_for: int = 3000) -> dict:
+        if not choosen_script:
+            raise ValueError(f"DEBUG: brak choosen_options, nie ma z czego wybrac dla '{choosen_script}'")
         
         actions = []
-        for s in gate_selectors:
-            actions.append({"type": "click", "selector": s})
+        for s in gate_scripts:
+            actions.append({"type": "executeJavascript", "script": s})
             actions.append({"type": "wait", "milliseconds": 800})
     
-        actions.append({"type": "click", "selector": choosen_selector})
+        actions.append({"type": "executeJavascript", "script": choosen_script})
         actions.append({"type": "wait", "milliseconds": 1500})
 
         result = self.app.scrape_url(
@@ -191,31 +191,31 @@ class FirecrawlClient:
     def fetch_filtered_data(self, url: str, resolved: list, filter: dict, items_list: list, available_options: list) -> list[dict]:
         filtered_data = []
 
-        selectors = resolved["gate_selectors"]
+        scripts = resolved["gate_scripts"]
         """
-        selectors = [
+        scripts = [
             "button[aria-label='Open Filter Menu']",
             "ti-search-field[placeholder='Filter by product or part number']",
         ]
-        print(selectors)
+        print(scripts)
         """
 
         if filter["cardinality"]== "identifier":
             for item in items_list: 
-                result = self._single_fetch(url, item, selectors)
+                result = self._single_fetch(url, item, scripts)
                 filtered_data.append(result)
 
         elif filter.get("bulk_search_supported"):
-            result = self._bulk_fetch(url, items_list, selectors)
+            result = self._bulk_fetch(url, items_list, scripts)
             filtered_data.append(result)
 
         elif filter["cardinality"]== "category":
             for value in items_list:
-                choosen_selector = self._resolve_choosen_option(available_options, value)
+                choosen_script = self._resolve_choosen_option(available_options, value)
 
                 #raise SystemError("DEBUG: Wanted selectors: #P7000 + coś, received selectors: " + ", ".join(selectors) + " and choosen selector " + choosen_selector)
             
-                result = result = self._category_fetch(url, selectors, choosen_selector)
+                result = result = self._category_fetch(url, scripts, choosen_script)
 
                 filtered_data.append(result)
         else:
@@ -233,3 +233,18 @@ class FirecrawlClient:
         )
 
         return {"html": result.html}    
+
+    def test(self):
+        result = self.app.scrape_url(
+            url="https://www.ti.com/product-category/sensors/products.html",
+            formats=['html'],
+            actions=[
+                {
+                    "type": "executeJavascript",
+                    "script": "return document.querySelectorAll('ti-search-field').length;"
+                },
+                {"type": "wait", "milliseconds": 800},
+                {"type": "scrape"}  # <- to Ci da html PO kliknięciu, w actions.scrapes
+            ]
+        )
+        print(result)

@@ -28,51 +28,51 @@ class Orchestrator:
 
         return result
 
-    def resolve_selectors(self, url: str, analisys: dict, filter: dict, max_depth: int = 5) -> list:        
+    def resolve_sripts(self, url: str, analisys: dict, filter: dict, max_depth: int = 5) -> list:        
         if analisys.get("confidence") == "none":
             raise ValueError(f"DEBUG: nie znaleziono '{filter['name']}' w HTML, evidence: {analisys.get('evidence')}")
         
-        if analisys["gate_needed"] and not analisys.get("target_selector"):
-            selectors = [analisys["gate_selector"]]
-            last_result = None # out target selector
+        if analisys["gate_script"] and not analisys.get("target_script"):
+            scripts = [analisys["gate_script"]]
+            last_result = None # out target script
 
             for _ in range(1,max_depth):
                 actions = []
 
-                for s in selectors:
-                    actions.append({"type": "click", "selector": s})
+                for s in scripts:
+                    actions.append({"type": "executeJavascript", "script": s})
                     actions.append({"type": "wait", "milliseconds": 800})
 
                 data_to_search = self.firecrawl.fetch_with_given_actions(url, actions) # we have to go deeper
-                result = self.extractor.find_selector(selectors, filter, data_to_search["html"])
+                result = self.extractor.find_script(scripts, filter, data_to_search["html"])
                 print(result)
 
-                if not result or not result.get("selector"):
+                if not result or not result.get("script"):
                     print("DEBUG: AI nie znalazlo nic, przerywam petle")
                     break
 
-                candidate = result["selector"]
+                candidate = result["script"]
 
-                if candidate in selectors:
-                    print(f"DEBUG: AI zwrocilo ten sam selector co juz mamy ('{candidate}') - utkneliśmy, przerywam")
+                if candidate in scripts:
+                    print(f"DEBUG: AI zwrocilo ten sam script co juz mamy ('{candidate}') - utkneliśmy, przerywam")
                     break
 
-                selectors.append(result["selector"])
+                scripts.append(result["script"])
                 last_result = result
 
                 if not result.get("needs_more_depth", False):
                     break
             print(last_result)
             return {
-                "gate_selectors": selectors,
+                "gate_script": scripts,
                 "available_options": last_result.get("available_options"),
                 "interaction_type": last_result.get("interaction_type")
             }
         
         # making sure there won't be any "None"
-        selectors = [s for s in (analisys["gate_selector"], analisys["target_selector"]) if s]
+        scripts = [s for s in (analisys["gate_script"], analisys["target_script"]) if s]
         return {
-            "gate_selectors": selectors,
+            "gate_script": scripts,
             "available_options": analisys.get("available_options"),
             "interaction_type": analisys.get("interaction_type")
         }
@@ -106,13 +106,71 @@ class Orchestrator:
                     "cardinality": "category",
                     "example_values": None
                 }
-        resolved = self.resolve_selectors(url, analisys, filter)
+        resolved = self.resolve_sripts(url, analisys, filter) ######## CZY JEST TO POTRZEBNE? jesli juz skrypty zwracamy... ######
 
         filtered_data = self.firecrawl.fetch_filtered_data(url, resolved, filter, csv_list, resolved["available_options"])
 
         return filtered_data
 
     def test(self):
+        ########################    ACTUAL TEST     #################################
+        start_test = time.time()
+
+        print("DEBUG: Start of the test")
+
+        url = "https://www.ti.com/product-category/sensors/products.html"
+        user_prompt = ""
+
+        start_sample = time.time()
+
+        page_sample = self.page_sample(url)
+
+        print(page_sample["page_sample_result"])
+        user_filter_choice = "Product number"
+        user_csv_list = ["TMP75","TMP117","TMP275"]
+        user_csv_list = ["TMP75"]
+
+        end_sample = time.time()
+        start_analisys = time.time()
+
+        filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice)
+        print(filter_analisys)
+
+        end_analisys = time.time()
+        start_filter = time.time()
+
+        filtered_data = self.filtered_scraping(
+            url, filter_analisys, 
+            page_sample["page_sample_result"], 
+            user_csv_list, user_filter_choice
+        )
+
+        end_filter = time.time()
+
+        #########   TEMP AI FUNC    #############
+        ai_filtered_data = self.extractor.debug_ask_ai_about_products(filtered_data)
+        print(f"========== DEBUG: filtered data result =========== \n{ai_filtered_data}")
+
+        end_test = time.time()
+        ########################    ACTUAL TEST     #################################
+                
+        prompt_tokens = sum(t["prompt_tokens"] for t in self.extractor.tokens_usage)
+        output_tokens = sum(t["output_tokens"] for t in self.extractor.tokens_usage)
+        total_tokens = sum(t["total_tokens"] for t in self.extractor.tokens_usage)
+
+        print("\n===== DEBUG: TOKEN USAGE =====")
+        print("\n=== GEMINI ===")
+        print(f"Prompt tokens : {prompt_tokens:,}")
+        print(f"Output tokens : {output_tokens:,}")
+        print(f"Total tokens  : {total_tokens:,}")
+
+        
+        print(f"DEBUG: test time: {end_test - start_test}")
+        print(f"\nDEBUG: suggestion time: {end_sample - start_sample:.2f}s")
+        print(f"\nDEBUG: analisys time: {end_analisys - start_analisys:.2f}s")
+        print(f"\nDEBUG: filtering data time: {end_filter - start_filter:.2f}s")
+
+    def test_stary(self):
         url = "https://www.vishay.com/en/mosfets/"
         url = "https://www.vishay.com/en/leds/smd/"
         #url = "https://www.ti.com/product-category/sensors/products.html"
