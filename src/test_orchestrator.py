@@ -5,7 +5,7 @@ def main():
     orchestrator = Orchestrator()
     firecrawl = FirecrawlClient()
     
-    orchestrator.test()
+    orchestrator.test_filter_finder()
     #firecrawl.test()
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ class Orchestrator:
 
         return result
 
-    def resolve_sripts(self, url: str, analisys: dict, filter: dict, max_depth: int = 5) -> list:        
+    def resolve_scripts(self, url: str, analisys: dict, filter: dict, max_depth: int = 5) -> list:        
         if analisys.get("confidence") == "none":
             raise ValueError(f"DEBUG: nie znaleziono '{filter['name']}' w HTML, evidence: {analisys.get('evidence')}")
         
@@ -106,11 +106,39 @@ class Orchestrator:
                     "cardinality": "category",
                     "example_values": None
                 }
-        resolved = self.resolve_sripts(url, analisys, filter) ######## CZY JEST TO POTRZEBNE? jesli juz skrypty zwracamy... ######
+        resolved = self.resolve_scripts(url, analisys, filter) ######## CZY JEST TO POTRZEBNE? jesli juz skrypty zwracamy... ######
 
         filtered_data = self.firecrawl.fetch_filtered_data(url, resolved, filter, csv_list, resolved["available_options"])
 
         return filtered_data
+
+    def test_filter_finder(self):
+        url = "https://www.ti.com/product-category/sensors/products.html"
+
+        import json
+
+        with open("data/page_sample_result.json", "r", encoding="utf-8") as f:
+            page_sample_result = json.load(f)
+        
+        with open("data/html_to_analize.txt", "r", encoding="utf-8") as f:
+            html_to_analize = f.read()
+
+        user_filter_choice = "Product number"
+        user_csv_list = ["TMP75","TMP117","TMP275"]
+        user_csv_list = ["TMP75"]
+
+        filter_options = page_sample_result.get("filter_options", [])
+        matched_filter = next((f for f in filter_options if user_filter_choice in f["name"]), None)
+
+        if not matched_filter:
+            raise ValueError(f"DEBUG: nie znaleziono filtra pasującego do '{user_filter_choice}' w filter_options")
+
+        
+        filter_analisys = self.search_for_filters(html_to_analize, user_filter_choice)
+        print(f"filter_analisys: \n {filter_analisys} \n\n")
+
+        resolved_scripts = self.resolve_scripts(url, filter_analisys, matched_filter)
+        print(f"resolved_scripts: \n {resolved_scripts}")
 
     def test(self):
         ########################    ACTUAL TEST     #################################
@@ -169,6 +197,9 @@ class Orchestrator:
         print(f"\nDEBUG: suggestion time: {end_sample - start_sample:.2f}s")
         print(f"\nDEBUG: analisys time: {end_analisys - start_analisys:.2f}s")
         print(f"\nDEBUG: filtering data time: {end_filter - start_filter:.2f}s")
+
+
+
 
     def test_stary(self):
         url = "https://www.vishay.com/en/mosfets/"
