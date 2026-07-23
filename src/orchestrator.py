@@ -28,8 +28,10 @@ class Orchestrator:
 
         return result
 
-    def resolve_selectors(self, url: str, analisys: dict, filter: dict, max_depth: int = 5) -> list:
-
+    def resolve_selectors(self, url: str, analisys: dict, filter: dict, max_depth: int = 5) -> list:        
+        if analisys.get("confidence") == "none":
+            raise ValueError(f"DEBUG: nie znaleziono '{filter['name']}' w HTML, evidence: {analisys.get('evidence')}")
+        
         if analisys["gate_needed"] and not analisys.get("target_selector"):
             selectors = [analisys["gate_selector"]]
             last_result = None # out target selector
@@ -43,6 +45,7 @@ class Orchestrator:
 
                 data_to_search = self.firecrawl.fetch_with_given_actions(url, actions) # we have to go deeper
                 result = self.extractor.find_selector(selectors, filter, data_to_search["html"])
+                print(result)
 
                 if not result or not result.get("selector"):
                     print("DEBUG: AI nie znalazlo nic, przerywam petle")
@@ -59,7 +62,7 @@ class Orchestrator:
 
                 if not result.get("needs_more_depth", False):
                     break
-
+            print(last_result)
             return {
                 "gate_selectors": selectors,
                 "available_options": last_result.get("available_options"),
@@ -79,11 +82,11 @@ class Orchestrator:
         filter_options = page_sample_result.get("filter_options",[])
         available_fields = page_sample_result.get("available_fields", [])
 
-        matched_filter = next((f for f in filter_options if f["name"] == user_choice), None)
+        matched_filter = next((f for f in filter_options if user_choice in f["name"]), None)
         filter = matched_filter
 
         if matched_filter is None:
-            matched_filter = next((f for f in available_fields if f == user_choice), None) # dict -> str
+            matched_filter = next((f for f in available_fields if user_choice in f), None) # dict -> str
 
             if matched_filter is None:
                 raise ValueError(f"Filter '{user_choice}' not found in detected filter_options")
@@ -111,6 +114,8 @@ class Orchestrator:
 
     def test(self):
         url = "https://www.vishay.com/en/mosfets/"
+        url = "https://www.vishay.com/en/leds/smd/"
+        #url = "https://www.ti.com/product-category/sensors/products.html"
         user_prompt = f"""
             You are given a list of MPNs called "csv_list".
 
@@ -172,12 +177,17 @@ class Orchestrator:
         only_filters = rezultat["available_fields"]
         only_products = rezultat["filter_options"]
 
+        #with open("data/html_to_analize.txt", "w", encoding="utf-8") as f:
+        #   f.write(result["html_to_analize"])
+
+        #return 0
+
         print(f"DEBUG: sample page result = \n{only_filters, only_products}")
         # user_choice = input("Enter your choice: ").strip()
 
         #csv_list = ["TMP75","TMP117","TMP275"]
-        user_choice = "Configuration"
-        csv_list = ["DUAL"]
+        user_choice = "Dominant Wavelength Min."
+        csv_list = ["627"]
 
         start_analisys = time.time()
         analisys = self.search_for_filters(result["html_to_analize"], user_choice)
@@ -214,7 +224,7 @@ class Orchestrator:
         print(f"\nDEBUG: filtering data time: {end_filter - start_filter:.2f}s")
 
         # print(f"\nDEBUG: result = \n{result}")
-        print(f"DEBUG: sample page result = \n{result["page_sample_result"]}")
-        print(f"DEBUG: analisys result = \n{analisys}")
-        print(f"DEBUG: filtered data result = \n{ai_filtered_data}")
+        #print(f"DEBUG: sample page result = \n{result["page_sample_result"]}")
+        #print(f"DEBUG: analisys result = \n{analisys}")
+        #print(f"DEBUG: filtered data result = \n{ai_filtered_data}")
         return 1

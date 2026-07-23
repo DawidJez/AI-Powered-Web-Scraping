@@ -188,7 +188,7 @@ class FirecrawlClient:
             "metadata": result.metadata
         }
 
-    def fetch_filtered_data(self, url: str, resolved: list, filter: dict, items_list: list, available_options: list) -> dict:
+    def fetch_filtered_data(self, url: str, resolved: list, filter: dict, items_list: list, available_options: list) -> list[dict]:
         filtered_data = []
 
         selectors = resolved["gate_selectors"]
@@ -224,6 +224,7 @@ class FirecrawlClient:
         return filtered_data
     
     def fetch_with_given_actions(self, url: str, actions: list, wait_for: int = 3000):
+        print(actions)
         result = self.app.scrape_url(
             url=url,
             formats=['html'],

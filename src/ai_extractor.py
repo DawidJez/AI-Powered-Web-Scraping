@@ -3,6 +3,7 @@ from google.genai import types
 from google.genai import errors
 import os
 import re
+from difflib import SequenceMatcher
 import json
 from bs4 import BeautifulSoup
 import time
@@ -17,7 +18,7 @@ class AIExtractor:
         # DEBUG INFO: use model="gemini-3.1-flash-lite"/"gemini-2.5-flash"/"gemini-2.5-flash-lite" 
         # after "gemini-flash-latest" is burnt out of tokens
 
-    def _extract_html_windows(self, html: str, search_term: str, window_size: int = 3000) -> list[dict]:
+    def _extract_html_windows(self, html: str, search_term: str, window_size: int = 3000, word_count: int = 3) -> list[dict]:
         soup = BeautifulSoup(html, "html.parser")
 
         for trash_tag in soup(["script", "style"]):
@@ -25,22 +26,25 @@ class AIExtractor:
 
         clean_html = soup.prettify()
 
+        short_term = " ".join(search_term.split()[:word_count])
+
         windows = []
         start_idx = 0
 
         while len(clean_html) > start_idx:
-            idx = clean_html.find(search_term, start_idx)
+            idx = clean_html.find(short_term, start_idx)
             if idx == -1:
                 break
-            
+
             start = max(0, idx - window_size)
-            end = min(len(clean_html), idx + len(search_term) + window_size)
+            end = min(len(clean_html), idx + len(short_term) + window_size)
 
             windows.append({"occurrence_index": len(windows), "fragment": clean_html[start:end]})
 
-            start_idx = idx + len(search_term)
+            start_idx = idx + len(short_term)
 
         return windows
+
     """
     # one thing to keep in mind is to check wether key words like "Status"/"Type" etc. 
     # are being properly found and if whole html isn't returned by mistake 
@@ -461,7 +465,16 @@ class AIExtractor:
         html_windows = self._extract_html_windows(html, search_term)
 
         if not html_windows:
-            return {"selector": None, "confidence": "none", "evidence": "text not found in HTML"}
+            return {
+                "chosen_occurrence_index": None,
+                "gate_selector": None,
+                "gate_needed": False,
+                "target_selector": None,
+                "available_options": [],
+                "interaction_type": "unknown",
+                "confidence": "none",
+                "evidence": "text not found in HTML"
+            }
         
         combined_windows = "\n\n".join(
             f"--- Occurrence {w['occurrence_index']} ---\n{w['fragment']}"
