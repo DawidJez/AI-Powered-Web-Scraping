@@ -109,9 +109,16 @@ class FirecrawlClient:
     def _single_fetch(self,url: str, item: str, scripts: list, wait_for: int = 3000) -> dict:
         actions = []
 
-        for s in scripts:
-            actions.append({"type": "executeJavascript", "script": s})
-            actions.append({"type": "wait", "milliseconds": 800})
+        gate_scripts = scripts["gate_scripts"]
+        final_script = scripts["final_script"]
+
+        if gate_scripts:
+            for s in gate_scripts:
+                actions.append({"type": "executeJavascript", "script": s})
+                actions.append({"type": "wait", "milliseconds": 800})
+
+        actions.append({"type": "executeJavascript", "script": final_script})
+        actions.append({"type": "wait", "milliseconds": 800})
 
         actions.append({"type": "write", "text": item})
         actions.append({"type": "wait", "milliseconds": 1500})
@@ -129,16 +136,25 @@ class FirecrawlClient:
             "metadata": result.metadata
         }
     
-    # script str to change -> scripts list
-    def _bulk_fetch(self,url: str, item_list: list, script: str, wait_for: int = 3000) -> dict:
+    def _bulk_fetch(self,url: str, item_list: list, scripts: dict, wait_for: int = 3000) -> dict:
         separator: str = ", "
         text_list = separator.join(item_list)
 
-        actions = [
-            {"type": "executeJavascript", "script": script},
-            {"type": "write", "text": text_list},
-            {"type": "wait", "milliseconds": 1500}
-        ]
+        actions = []
+
+        gate_scripts = scripts["gate_scripts"]
+        final_script = scripts["final_script"]
+
+        if gate_scripts:
+            for s in gate_scripts:
+                actions.append({"type": "executeJavascript", "script": s})
+                actions.append({"type": "wait", "milliseconds": 800})
+
+        actions.append({"type": "executeJavascript", "script": final_script})
+        actions.append({"type": "wait", "milliseconds": 800})
+
+        actions.append({"type": "write", "text": text_list})
+        actions.append({"type": "wait", "milliseconds": 1500})
 
         result = self.app.scrape_url(
             url=url,
@@ -163,9 +179,11 @@ class FirecrawlClient:
         matched_value = match[0]
         return next(o["script"] for o in available_options if o["value"] == matched_value)
     
-    def _category_fetch(self, url: str, gate_scripts: list, choosen_script: str, wait_for: int = 3000) -> dict:
+    def _category_fetch(self, url: str, scripts: list, choosen_script: str, wait_for: int = 3000) -> dict:
         if not choosen_script:
             raise ValueError(f"DEBUG: brak choosen_options, nie ma z czego wybrac dla '{choosen_script}'")
+
+        gate_scripts = scripts["gate_scripts"]
         
         actions = []
         for s in gate_scripts:
@@ -191,7 +209,6 @@ class FirecrawlClient:
     def fetch_filtered_data(self, url: str, resolved: list, filter: dict, items_list: list, available_options: list) -> list[dict]:
         filtered_data = []
 
-        scripts = resolved["gate_scripts"]
         """
         scripts = [
             "button[aria-label='Open Filter Menu']",
@@ -202,11 +219,11 @@ class FirecrawlClient:
 
         if filter["cardinality"]== "identifier":
             for item in items_list: 
-                result = self._single_fetch(url, item, scripts)
+                result = self._single_fetch(url, item, resolved)
                 filtered_data.append(result)
 
         elif filter.get("bulk_search_supported"):
-            result = self._bulk_fetch(url, items_list, scripts)
+            result = self._bulk_fetch(url, items_list, resolved)
             filtered_data.append(result)
 
         elif filter["cardinality"]== "category":
@@ -215,7 +232,7 @@ class FirecrawlClient:
 
                 #raise SystemError("DEBUG: Wanted selectors: #P7000 + coś, received selectors: " + ", ".join(selectors) + " and choosen selector " + choosen_selector)
             
-                result = result = self._category_fetch(url, scripts, choosen_script)
+                result = result = self._category_fetch(url, resolved, choosen_script)
 
                 filtered_data.append(result)
         else:

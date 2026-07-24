@@ -47,32 +47,40 @@ class Orchestrator:
                 result = self.extractor.find_script(scripts, filter, data_to_search["html"])
                 print(result)
 
-                if not result or not result.get("script"):
+                if not result or result.get("control_type") == "none":
                     print("DEBUG: AI nie znalazlo nic, przerywam petle")
                     break
 
-                candidate = result["script"]
+                candidate = result.get("script")
 
-                if candidate in scripts:
-                    print(f"DEBUG: AI zwrocilo ten sam script co juz mamy ('{candidate}') - utkneliśmy, przerywam")
-                    break
+                # category-type field (available_options) - script may be null, but it doesn't mean there is nothing
+                if candidate:    
+                    if candidate in scripts:
+                        print(f"DEBUG: AI zwrocilo ten sam script co juz mamy ('{candidate}') - utkneliśmy, przerywam")
+                        break
 
-                scripts.append(result["script"])
+                    scripts.append(result["script"])
+
                 last_result = result
 
                 if not result.get("needs_more_depth", False):
                     break
+
             print(last_result)
-            return {
-                "gate_script": scripts,
-                "available_options": last_result.get("available_options"),
-                "interaction_type": last_result.get("interaction_type")
-            }
+
+            final_script = last_result.get("script") if last_result else None
+            gate_scripts = scripts[:-1] if final_script and scripts and scripts[-1] == final_script else scripts
+            return {                                                                                  
+                "gate_scripts": gate_scripts,                                                         
+                "final_script": final_script,
+                "available_options": last_result.get("available_options") if last_result else [],
+                "interaction_type": last_result.get("interaction_type") if last_result else "unknown"
+            }                                                                                  
         
-        # making sure there won't be any "None"
-        scripts = [s for s in (analisys["gate_script"], analisys["target_script"]) if s]
+        gate_scripts = [analisys["gate_script"]] if analisys.get("gate_script") else []
         return {
-            "gate_script": scripts,
+            "gate_scripts": gate_scripts,
+            "final_script": analisys.get("target_script"),
             "available_options": analisys.get("available_options"),
             "interaction_type": analisys.get("interaction_type")
         }
@@ -106,7 +114,7 @@ class Orchestrator:
                     "cardinality": "category",
                     "example_values": None
                 }
-        resolved = self.resolve_scripts(url, analisys, filter) ######## CZY JEST TO POTRZEBNE? jesli juz skrypty zwracamy... ######
+        resolved = self.resolve_scripts(url, analisys, filter)
 
         filtered_data = self.firecrawl.fetch_filtered_data(url, resolved, filter, csv_list, resolved["available_options"])
 

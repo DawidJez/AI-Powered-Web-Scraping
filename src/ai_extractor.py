@@ -587,13 +587,39 @@ class AIExtractor:
             section entirely and just return a single "target_script" as before -
             "available_options" should be an empty list in that case.
 
-            CRITICAL: Never select an element that has a "disabled" attribute, or that appears
-            to be a hidden/internal implementation detail (e.g. zero-size, aria-hidden, or part
-            of a data-grid's internal filter row that isn't the page's actual visible search
-            control). If the fragment shows both a disabled/hidden input AND a separate visible
-            custom element (e.g. a custom tag like <ti-search-field>, or any element with a
-            visible "placeholder" attribute suggesting it's meant for user typing), prefer the
-            visible custom element instead. Explain this reasoning in "evidence" if relevant.
+            # CRITICAL PRIORITY RULE - read this before answering
+            Web components (custom HTML tags containing a hyphen, e.g. <ti-search-field>,
+            <x-autocomplete>, <my-input>) frequently WRAP a real, functional input inside
+            their Shadow DOM, while a nearby "twin" plain <input> element in the light DOM
+            (same visual area, similar aria-label) is often a DISABLED, invisible, or
+            purely internal implementation detail belonging to an underlying grid/table
+            library (e.g. AG Grid's own floating filter row) - not the actual control the
+            user interacts with.
+
+            When you encounter BOTH of these in the same fragment or across fragments for
+            the same target field:
+            - a plain <input>/<select>/<button> that is disabled, zero-size, or otherwise
+            looks like an internal/hidden implementation detail, AND
+            - a custom web component (hyphenated tag name) with a visible "placeholder"
+            or similar user-facing attribute, positioned in the same area
+
+            You MUST choose the custom web component, even if its aria-label is less
+            obviously matching the target field name than the disabled input's aria-label.
+            A visible placeholder/label on the custom element referencing the target field
+            (even loosely, e.g. "Filter by product or part number" for a "Product number"
+            field) is sufficient evidence to prefer it. Matching aria-label text on a
+            disabled element is NEVER sufficient reason to choose it over a visible,
+            enabled custom component - disabled state always disqualifies an element
+            regardless of how well its label matches. A gate button (e.g. "Open Filter
+            Menu") does NOT make a disabled input become the right answer - if a disabled
+            input and a visible custom element both exist for this field, the custom
+            element is the target_script regardless of whether a gate is also present.
+
+            Write the script targeting the custom element directly by its own tag name plus
+            a literally-present distinguishing attribute (e.g.
+            document.querySelector("ti-search-field[placeholder='...']").focus()) - do NOT
+            attempt to reach inside its shadow DOM unless you have concrete evidence you need
+            to (see shadow DOM guidance above).
 
             If NONE of the fragments look like a real filter control (field-specific or gate),
             return null for both scripts, empty list for "available_options", and explain why
