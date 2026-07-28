@@ -563,6 +563,41 @@ class AIExtractor:
             Do NOT attempt to set .value or simulate typing in the script - actual text entry
             is handled by a separate step after this script runs.
 
+            # Scoping when elements repeat identically across columns
+            Grid-like tables (e.g. AG Grid and similar libraries) commonly render the SAME
+            generic control once per column, with IDENTICAL attributes on every copy - e.g.
+            every column gets its own "Open Filter Menu" button, all sharing the same
+            aria-label, same internal ref, same class, and often no distinguishing col-id at
+            all. A script like document.querySelector('button[aria-label="Open Filter Menu"]')
+            is NOT sufficient in this situation - querySelector always returns the FIRST match
+            in the whole page, which is very likely the WRONG column's control.
+
+            Such grids often have two separate structures that are siblings, not parent-child:
+            one row/section for column headers (with the field names), and another separate
+            row/section for the per-column controls (e.g. a "floating filter" row) - linked by
+            a shared positional attribute on both sides, such as a matching aria-colindex (or
+            similar index/position attribute) on the header cell and on the corresponding
+            control cell. If you observe this pattern (repeated identical controls, headers
+            and controls in separate structures), you MUST scope the script using that shared
+            attribute rather than writing an unscoped/global selector for the repeated control.
+            General approach:
+            1. Find the header element containing the target field's text.
+            2. Read its positional attribute (e.g. aria-colindex).
+            3. Find the sibling control-row element that shares the same positional attribute
+               value, and query the actual button/input WITHIN that specific scoped element.
+
+            This scoping concern applies to the GATE (the repeated generic control), not
+            necessarily to what appears after the gate is clicked - a panel/popup revealed by
+            a gate is often a singleton (only one instance exists in the DOM at a time, since
+            a user can only open one column's panel at once), so the control(s) inside it can
+            usually be queried directly (or scoped by their own literal, unique attributes like
+            id/placeholder) without needing the same positional-index scoping.
+
+            If you do NOT see evidence of this repeated-identical-control pattern (e.g. the
+            gate or control already has a unique, literal distinguishing attribute of its own),
+            a direct unscoped selector is fine - don't add unnecessary complexity when it isn't
+            needed.
+
             # MULTIPLE OPTIONS MODE - important for category-type fields
             If "interaction_type" is "click_checkbox", "click_option", or "select_dropdown"
             (i.e. the field works by picking ONE value out of SEVERAL selectable options,
@@ -616,10 +651,14 @@ class AIExtractor:
             element is the target_script regardless of whether a gate is also present.
 
             Write the script targeting the custom element directly by its own tag name plus
-            a literally-present distinguishing attribute (e.g.
-            document.querySelector("ti-search-field[placeholder='...']").focus()) - do NOT
-            attempt to reach inside its shadow DOM unless you have concrete evidence you need
-            to (see shadow DOM guidance above).
+            a literally-present distinguishing attribute. For "click"/"click_checkbox"-style
+            interactions where clicking the outer custom element itself is enough, use it
+            directly (e.g. document.querySelector("ti-search-field[placeholder='...']").click()).
+            For "type"/"focus" interactions where you need the actual inner input, you MUST
+            go through .shadowRoot.querySelector(...) - do NOT call .focus() directly on the
+            custom element's outer tag if the field's real input is nested in its shadow DOM
+            (see shadow DOM guidance above), e.g.:
+            document.querySelector("ti-search-field[placeholder='...']").shadowRoot.querySelector('input').focus();
 
             If NONE of the fragments look like a real filter control (field-specific or gate),
             return null for both scripts, empty list for "available_options", and explain why
@@ -720,8 +759,13 @@ class AIExtractor:
     def find_script(self, scripts: list, filter: dict, html: str, max_retries: int = 3) -> dict:
         """we take the filter["name"] so llm will know what its actually looking for"""
 
-        search_term = filter["name"]
-        html_windows = self._extract_html_windows(html, search_term)
+        search_terms = filter.get("search_terms") or [filter["name"]]
+        html_windows = []
+
+        for term in search_terms:
+            windows = self._extract_html_windows(html, term)
+            if windows:
+                html_windows.extend(windows)
 
         if not html_windows:
             return {"script": None, "confidence": "none", "evidence": "text not found in HTML"}
@@ -730,6 +774,10 @@ class AIExtractor:
             f"--- Occurrence {w['occurrence_index']} ---\n{w['fragment']}"
             for w in html_windows
         )
+
+        import time
+        with open(f"data/test_files/combined_windows/debug_windows_{time.time()}.txt", "w", encoding="utf-8") as f:
+            f.write(combined_windows)
 
         system_instruction = ("""
             # Role
@@ -798,9 +846,14 @@ class AIExtractor:
                 .find(el => el.textContent.includes('TARGET TEXT'))
             - .closest(...) to walk up from a matched text node to its actual clickable ancestor
             - For shadow DOM elements (custom tags with a hyphen in the name, e.g.
-            <ti-search-field>), access shadow content explicitly via
-            `.shadowRoot.querySelector(...)` - never assume a plain descendant CSS selector
-            can reach inside a shadow root.
+            <ti-search-field>), you MUST access shadow content explicitly via
+            `.shadowRoot.querySelector(...)`. A plain descendant CSS selector like
+            `ti-search-field input` will NEVER work and will return null - shadow DOM
+            content is not reachable through normal CSS descendant combinators, no
+            matter how the selector is written. If you need to reach an element inside
+            a hyphenated custom tag, always chain `.shadowRoot.querySelector(...)`
+            after selecting the custom element itself, e.g.:
+            document.querySelector('ti-search-field[placeholder="..."]').shadowRoot.querySelector('input').focus();
 
             The snippet's final statement must actually perform the interaction (e.g. end with
             `.click()` or `.focus()`), not just locate the element.
@@ -813,6 +866,45 @@ class AIExtractor:
             input element to activate it (e.g. `document.querySelector('...').focus();`).
             Do NOT attempt to set .value or simulate typing in the script - actual text entry
             is handled by a separate step after this script runs.
+
+            # Scoping when elements repeat identically across columns
+            Grid-like tables (e.g. AG Grid and similar libraries) commonly render the SAME
+            generic control once per column, with IDENTICAL attributes on every copy - e.g.
+            every column gets its own "Open Filter Menu" button, all sharing the same
+            aria-label, same internal ref, same class, and often no distinguishing col-id at
+            all. A script like document.querySelector('button[aria-label="Open Filter Menu"]')
+            is NOT sufficient in this situation - querySelector always returns the FIRST match
+            in the whole page, which is very likely the WRONG column's control.
+
+            Such grids often have two separate structures that are siblings, not parent-child:
+            one row/section for column headers (with the field names), and another separate
+            row/section for the per-column controls (e.g. a "floating filter" row) - linked by
+            a shared positional attribute on both sides, such as a matching aria-colindex (or
+            similar index/position attribute) on the header cell and on the corresponding
+            control cell. If you observe this pattern (repeated identical controls, headers
+            and controls in separate structures), you MUST scope the script using that shared
+            attribute rather than writing an unscoped/global selector for the repeated control.
+            General approach:
+            1. Find the header element containing the target field's text.
+            2. Read its positional attribute (e.g. aria-colindex).
+            3. Find the sibling control-row element that shares the same positional attribute
+               value, and query the actual button/input WITHIN that specific scoped element.
+
+            This scoping concern applies to a GATE (a repeated generic control shared across
+            many fields), not necessarily to what appears after a gate is clicked - a
+            panel/popup revealed by a gate is often a singleton (only one instance exists in
+            the DOM at a time, since a user can only open one column's panel at once), so the
+            control(s) inside it can usually be queried directly (or scoped by their own
+            literal, unique attributes like id/placeholder) without needing the same
+            positional-index scoping. If the fragments here already show content INSIDE an
+            opened panel (rather than another repeated generic gate), a direct/unscoped
+            selector using the element's own unique attributes (e.g. its literal id) is
+            normal and correct - don't add unnecessary scoping complexity when the element
+            is already uniquely identifiable.
+
+            If you do NOT see evidence of a repeated-identical-control pattern (e.g. the
+            control already has a unique, literal distinguishing attribute of its own), a
+            direct unscoped selector is fine.
 
             # MULTIPLE OPTIONS MODE - important for category-type fields
             If "control_type" is "final_control" AND "interaction_type" is "click_checkbox",
@@ -864,10 +956,14 @@ class AIExtractor:
             regardless of how well its label matches.
 
             Write the script targeting the custom element directly by its own tag name plus
-            a literally-present distinguishing attribute (e.g.
-            document.querySelector("ti-search-field[placeholder='...']").focus()) - do NOT
-            attempt to reach inside its shadow DOM unless the fragment shows you need to
-            (see shadow DOM guidance above).
+            a literally-present distinguishing attribute. For "click"/"click_checkbox"-style
+            interactions where clicking the outer custom element itself is enough, use it
+            directly (e.g. document.querySelector("ti-search-field[placeholder='...']").click()).
+            For "type"/"focus" interactions where you need the actual inner input, you MUST
+            go through .shadowRoot.querySelector(...) - do NOT call .focus() directly on the
+            custom element's outer tag if the field's real input is nested in its shadow DOM
+            (see shadow DOM guidance above), e.g.:
+            document.querySelector("ti-search-field[placeholder='...']").shadowRoot.querySelector('input').focus();
 
             # What to avoid
             - Do not select a plain data-row link (<a>) that navigates to an unrelated page
@@ -909,7 +1005,7 @@ class AIExtractor:
                 response = self.client.models.generate_content(
                     model=self.model,
                     contents=[
-                        f"Target label: {search_term}\n\n"
+                        f"Target label (the first is the search_term and the others are help phrases): {search_terms}\n\n"
                         f"{history_block}\n\n"
                         f"HTML fragment:\n{combined_windows}"
                     ],

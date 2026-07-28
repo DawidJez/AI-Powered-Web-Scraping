@@ -44,8 +44,15 @@ class Orchestrator:
                     actions.append({"type": "wait", "milliseconds": 800})
 
                 data_to_search = self.firecrawl.fetch_with_given_actions(url, actions) # we have to go deeper
+
+                import time
+                with open(f"data/test_files/debug_full_html_{int(time.time()*1000)}.txt", "w", encoding="utf-8") as f:
+                    f.write(data_to_search["html"])
+
                 result = self.extractor.find_script(scripts, filter, data_to_search["html"])
                 print(result)
+
+                last_result = result
 
                 if not result or result.get("control_type") == "none":
                     print("DEBUG: AI nie znalazlo nic, przerywam petle")
@@ -60,8 +67,6 @@ class Orchestrator:
                         break
 
                     scripts.append(result["script"])
-
-                last_result = result
 
                 if not result.get("needs_more_depth", False):
                     break
@@ -85,7 +90,9 @@ class Orchestrator:
             "interaction_type": analisys.get("interaction_type")
         }
 
-    def filtered_scraping(self, url: str, analisys: dict, page_sample_result: dict, csv_list: list[str], user_choice: str) -> dict:
+    def filtered_scraping(self, url: str, analisys: dict, page_sample_result: dict, csv_list: list[str], user_choices: list) -> dict:
+        """For now, we give this function user_choices as user choice of filter + help phrases for html extract"""
+        user_choice = user_choices[0]
        
         filter_options = page_sample_result.get("filter_options",[])
         available_fields = page_sample_result.get("available_fields", [])
@@ -114,6 +121,8 @@ class Orchestrator:
                     "cardinality": "category",
                     "example_values": None
                 }
+
+        filter["search_terms"] = [choice for choice in user_choices]
         resolved = self.resolve_scripts(url, analisys, filter)
 
         filtered_data = self.firecrawl.fetch_filtered_data(url, resolved, filter, csv_list, resolved["available_options"])
@@ -137,6 +146,8 @@ class Orchestrator:
 
         filter_options = page_sample_result.get("filter_options", [])
         matched_filter = next((f for f in filter_options if user_filter_choice in f["name"]), None)
+
+        matched_filter["search_terms"] = ["Product number", "part number"]
 
         if not matched_filter:
             raise ValueError(f"DEBUG: nie znaleziono filtra pasującego do '{user_filter_choice}' w filter_options")
@@ -162,7 +173,9 @@ class Orchestrator:
         page_sample = self.page_sample(url)
 
         print(page_sample["page_sample_result"])
-        user_filter_choice = "Product number"
+        # 1. is the filter name 2. and 3. are help phrases (max 2 help phrases)
+        user_choices = ["Product number", "part number"]
+        user_filter_choice = user_choices[0]
         user_csv_list = ["TMP75","TMP117","TMP275"]
         user_csv_list = ["TMP75"]
 
@@ -178,7 +191,7 @@ class Orchestrator:
         filtered_data = self.filtered_scraping(
             url, filter_analisys, 
             page_sample["page_sample_result"], 
-            user_csv_list, user_filter_choice
+            user_csv_list, user_choices
         )
 
         end_filter = time.time()
