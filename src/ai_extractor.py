@@ -650,6 +650,14 @@ class AIExtractor:
             input and a visible custom element both exist for this field, the custom
             element is the target_script regardless of whether a gate is also present.
 
+            Moreover, a disabled/hidden element must NEVER be chosen as target_script even
+            when NO alternative custom element is visible in the current fragments - a
+            disabled input existing alone (with its real, enabled counterpart only appearing
+            after a gate is clicked, and thus not yet visible here) is NOT sufficient
+            evidence to select it. In that case, return null for target_script and set
+            gate_needed to true instead, so the actual control can be discovered in a later
+            step after the gate is clicked.
+
             Write the script targeting the custom element directly by its own tag name plus
             a literally-present distinguishing attribute. For "click"/"click_checkbox"-style
             interactions where clicking the outer custom element itself is enough, use it

@@ -24,7 +24,8 @@ class FirecrawlClient:
             url=url,
             formats=['markdown', 'html', 'links'],
             wait_for=wait_for,
-            actions=actions
+            actions=actions,
+            proxy="auto"
         )
 
         return {
@@ -52,7 +53,8 @@ class FirecrawlClient:
                 url=url, 
                 formats=["markdown", "html"], 
                 wait_for=wait_for,
-                actions=actions
+                actions=actions,
+                proxy="auto"
             )
 
             all_pages.append({"markdown": result.markdown, "html": result.html})
@@ -127,7 +129,8 @@ class FirecrawlClient:
             url=url,
             formats=['markdown', 'links'],
             wait_for=wait_for,
-            actions=actions
+            actions=actions,
+            proxy="auto"
         )
 
         return {
@@ -160,7 +163,8 @@ class FirecrawlClient:
             url=url,
             formats=['markdown', 'links'],
             wait_for=wait_for,
-            actions=actions
+            actions=actions,
+            proxy="auto"
         )
 
         return {
@@ -171,6 +175,7 @@ class FirecrawlClient:
     
     def _resolve_choosen_option(self, available_options: list, wanted_value: str):
         values = [opt["value"] for opt in available_options]
+        print(values)
         match = difflib.get_close_matches(wanted_value, values, n=1, cutoff=0.4)
 
         if not match:
@@ -197,7 +202,8 @@ class FirecrawlClient:
             url=url,
             formats=['markdown', 'links'],
             wait_for=wait_for,
-            actions=actions
+            actions=actions,
+            proxy="auto"
         )
 
         return {
@@ -246,22 +252,8 @@ class FirecrawlClient:
             url=url,
             formats=['html'],
             wait_for=wait_for,
-            actions=actions
+            actions=actions,
+            proxy="auto"
         )
 
         return {"html": result.html}    
-
-    def test(self):
-        result = self.app.scrape_url(
-            url="https://www.ti.com/product-category/sensors/products.html",
-            formats=['html'],
-            actions=[
-                {
-                    "type": "executeJavascript",
-                    "script": "return document.querySelectorAll('ti-search-field').length;"
-                },
-                {"type": "wait", "milliseconds": 800},
-                {"type": "scrape"}  # <- to Ci da html PO kliknięciu, w actions.scrapes
-            ]
-        )
-        print(result)

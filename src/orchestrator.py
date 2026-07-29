@@ -97,11 +97,11 @@ class Orchestrator:
         filter_options = page_sample_result.get("filter_options",[])
         available_fields = page_sample_result.get("available_fields", [])
 
-        matched_filter = next((f for f in filter_options if user_choice in f["name"]), None)
+        matched_filter = next((f for f in filter_options if user_choice.lower() in f["name"].lower()), None)
         filter = matched_filter
 
         if matched_filter is None:
-            matched_filter = next((f for f in available_fields if user_choice in f), None) # dict -> str
+            matched_filter = next((f for f in available_fields if user_choice.lower() in f.lower()), None) # dict -> str
 
             if matched_filter is None:
                 raise ValueError(f"Filter '{user_choice}' not found in detected filter_options")
@@ -124,6 +124,8 @@ class Orchestrator:
 
         filter["search_terms"] = [choice for choice in user_choices]
         resolved = self.resolve_scripts(url, analisys, filter)
+
+        print(f"\n\n\n{resolved}\n\n\n")
 
         filtered_data = self.firecrawl.fetch_filtered_data(url, resolved, filter, csv_list, resolved["available_options"])
 
@@ -165,7 +167,11 @@ class Orchestrator:
 
         print("DEBUG: Start of the test")
 
-        url = "https://www.ti.com/product-category/sensors/products.html"
+        # url = "https://www.hebe.pl/wlosy/" -->Strong CloudFlare
+        # url = "https://www.ti.com/product-category/rf-microwave/rf-power-detectors/products.html" works great
+        # url = "https://www.ti.com/product-category/sensors/products.html#" --> shit cool
+        # url = "https://www.analog.com/en/product-category/sensors.html" --> doesnt work that far away from target
+        url = "https://www.analog.com/en/parametricsearch/2476#/"
         user_prompt = ""
 
         start_sample = time.time()
@@ -174,10 +180,11 @@ class Orchestrator:
 
         print(page_sample["page_sample_result"])
         # 1. is the filter name 2. and 3. are help phrases (max 2 help phrases)
-        user_choices = ["Product number", "part number"]
+        user_choices = ["Parts", "Filter Parts"]
         user_filter_choice = user_choices[0]
+        user_csv_list = ["30", "24"]
         user_csv_list = ["TMP75","TMP117","TMP275"]
-        user_csv_list = ["TMP75"]
+        user_csv_list= ["ADXRS6"]
 
         end_sample = time.time()
         start_analisys = time.time()
