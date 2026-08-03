@@ -175,7 +175,6 @@ class FirecrawlClient:
     
     def _resolve_choosen_option(self, available_options: list, wanted_value: str):
         values = [opt["value"] for opt in available_options]
-        print(values)
         match = difflib.get_close_matches(wanted_value, values, n=1, cutoff=0.4)
 
         if not match:
@@ -212,19 +211,24 @@ class FirecrawlClient:
             "metadata": result.metadata
         }
 
+    # helper for dropdown selectors cuz ai is messing with it
+    def _build_select_script(select_selector: str, option_value: str) -> str:
+        return f"""
+            const select = document.querySelector('{select_selector}');
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+            setter.call(select, '{option_value}');
+            select.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            select.dispatchEvent(new Event('change', {{ bubbles: true }}));
+        """
+
     def fetch_filtered_data(self, url: str, resolved: list, filter: dict, items_list: list, available_options: list) -> list[dict]:
         filtered_data = []
 
-        """
-        scripts = [
-            "button[aria-label='Open Filter Menu']",
-            "ti-search-field[placeholder='Filter by product or part number']",
-        ]
-        print(scripts)
-        """
+        if resolved.get("available_options") and resolved.get("final_script") is None: # it should be category so we had to make sure there will be fallback
+            filter["cardinality"] = "category"
 
         if filter["cardinality"]== "identifier":
-            for item in items_list: 
+            for item in items_list:
                 result = self._single_fetch(url, item, resolved)
                 filtered_data.append(result)
 
@@ -236,10 +240,7 @@ class FirecrawlClient:
             for value in items_list:
                 choosen_script = self._resolve_choosen_option(available_options, value)
 
-                #raise SystemError("DEBUG: Wanted selectors: #P7000 + coś, received selectors: " + ", ".join(selectors) + " and choosen selector " + choosen_selector)
-            
-                result = result = self._category_fetch(url, resolved, choosen_script)
-
+                result = self._category_fetch(url, resolved, choosen_script)
                 filtered_data.append(result)
         else:
             raise NotImplementedError("unrecognized filter cardinality")

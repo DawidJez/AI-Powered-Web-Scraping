@@ -45,9 +45,9 @@ class Orchestrator:
 
                 data_to_search = self.firecrawl.fetch_with_given_actions(url, actions) # we have to go deeper
 
-                import time
-                with open(f"data/test_files/debug_full_html_{int(time.time()*1000)}.txt", "w", encoding="utf-8") as f:
-                    f.write(data_to_search["html"])
+                #import time
+                #with open(f"data/test_files/debug_full_html_{int(time.time()*1000)}.txt", "w", encoding="utf-8") as f:
+                #   f.write(data_to_search["html"])
 
                 result = self.extractor.find_script(scripts, filter, data_to_search["html"])
                 print(result)
@@ -171,7 +171,8 @@ class Orchestrator:
         # url = "https://www.ti.com/product-category/rf-microwave/rf-power-detectors/products.html" works great
         # url = "https://www.ti.com/product-category/sensors/products.html#" --> shit cool
         # url = "https://www.analog.com/en/product-category/sensors.html" --> doesnt work that far away from target
-        url = "https://www.analog.com/en/parametricsearch/2476#/"
+        # url = "https://www.analog.com/en/parametricsearch/2476#/"
+        url = "https://www.vishay.com/en/leds/smd/"
         user_prompt = ""
 
         start_sample = time.time()
@@ -180,11 +181,13 @@ class Orchestrator:
 
         print(page_sample["page_sample_result"])
         # 1. is the filter name 2. and 3. are help phrases (max 2 help phrases)
-        user_choices = ["Parts", "Filter Parts"]
+        user_choices = ["Dominant Wavelength Min.", "360"]
         user_filter_choice = user_choices[0]
         user_csv_list = ["30", "24"]
         user_csv_list = ["TMP75","TMP117","TMP275"]
         user_csv_list= ["ADXRS6"]
+        user_csv_list = ["TLMG1100", "TLMO1000"]
+        user_csv_list = ["360"]
 
         end_sample = time.time()
         start_analisys = time.time()
@@ -204,8 +207,7 @@ class Orchestrator:
         end_filter = time.time()
 
         #########   TEMP AI FUNC    #############
-        ai_filtered_data = self.extractor.debug_ask_ai_about_products(filtered_data)
-        print(f"========== DEBUG: filtered data result =========== \n{ai_filtered_data}")
+        self.extractor.debug_ask_ai_about_products(filtered_data)
 
         end_test = time.time()
         ########################    ACTUAL TEST     #################################
@@ -221,10 +223,10 @@ class Orchestrator:
         print(f"Total tokens  : {total_tokens:,}")
 
         
-        print(f"DEBUG: test time: {end_test - start_test}")
-        print(f"\nDEBUG: suggestion time: {end_sample - start_sample:.2f}s")
-        print(f"\nDEBUG: analisys time: {end_analisys - start_analisys:.2f}s")
-        print(f"\nDEBUG: filtering data time: {end_filter - start_filter:.2f}s")
+        print(f"\nDEBUG: test time: {end_test - start_test}")
+        print(f"DEBUG: suggestion time: {end_sample - start_sample:.2f}s")
+        print(f"DEBUG: analisys time: {end_analisys - start_analisys:.2f}s")
+        print(f"DEBUG: filtering data time: {end_filter - start_filter:.2f}s")
 
 
 
