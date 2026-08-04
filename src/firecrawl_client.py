@@ -123,6 +123,8 @@ class FirecrawlClient:
         actions.append({"type": "wait", "milliseconds": 800})
 
         actions.append({"type": "write", "text": item})
+        actions.append({"type": "wait", "milliseconds": 800})
+        actions.append({"type": "press", "key": "Enter"})
         actions.append({"type": "wait", "milliseconds": 1500})
 
         result = self.app.scrape_url(
@@ -224,8 +226,10 @@ class FirecrawlClient:
     def fetch_filtered_data(self, url: str, resolved: list, filter: dict, items_list: list, available_options: list) -> list[dict]:
         filtered_data = []
 
-        if resolved.get("available_options") and resolved.get("final_script") is None: # it should be category so we had to make sure there will be fallback
+        if resolved.get("available_options") and not resolved.get("final_script"): # it should be category so we had to make sure there will be fallback
             filter["cardinality"] = "category"
+        elif resolved.get("final_script") and not resolved.get("available_options"):
+            filter["cardinality"] = "identifier"
 
         if filter["cardinality"]== "identifier":
             for item in items_list:

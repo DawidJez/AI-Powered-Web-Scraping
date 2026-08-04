@@ -556,6 +556,12 @@ class AIExtractor:
             is handled by a separate step after this script runs.
 
             # Scoping when elements repeat identically across columns
+            Watch for elements carrying BOTH the generic header class AND a more specific role-indicating class 
+            (e.g. ag-header-cell + ag-floating-filter) sharing the same positional index — prefer 
+            scoping through the MORE SPECIFIC class, since a generic class may match multiple 
+            distinct elements (e.g. both the column title header and its floating filter row) 
+            at the same index.
+
             Grid-like tables (e.g. AG Grid and similar libraries) commonly render the SAME
             generic control once per column, with IDENTICAL attributes on every copy - e.g.
             every column gets its own "Open Filter Menu" button, all sharing the same
@@ -663,6 +669,9 @@ class AIExtractor:
             functional input in Shadow DOM, while a nearby plain <input>/<select>/<button>
             "twin" (disabled, zero-size, or otherwise internal) may share a similar aria-label
             but is NOT the real control.
+
+            (This rule applies regardless of interaction_type — including 'type' fields. 
+            A disabled <input> is never a valid target_script, full stop.)
 
             Rule: disabled/hidden state always disqualifies an element, regardless of how well
             its label matches. A visible custom element with even a loosely-matching
@@ -875,6 +884,12 @@ class AIExtractor:
             text entry is handled by a separate step after this script runs.
 
             # Scoping - repeated identical controls across columns
+            Watch for elements carrying BOTH the generic header class AND a more specific role-indicating class 
+            (e.g. ag-header-cell + ag-floating-filter) sharing the same positional index — prefer 
+            scoping through the MORE SPECIFIC class, since a generic class may match multiple 
+            distinct elements (e.g. both the column title header and its floating filter row) 
+            at the same index.
+            
             Grid-like tables (AG Grid and similar) commonly render the SAME generic control once
             per column with IDENTICAL attributes on every copy (same class, same aria-label, no
             distinguishing col-id). An unscoped selector like
@@ -974,6 +989,9 @@ class AIExtractor:
             light DOM (same visual area, similar aria-label) is often DISABLED/invisible/internal
             to an underlying grid library - not the actual control.
 
+            (This rule applies regardless of interaction_type — including 'type' fields. 
+            A disabled <input> is never a valid target_script, full stop.)
+
             When both appear for the same target field:
             - a plain <input>/<select>/<button> that is disabled, zero-size, or otherwise an
             internal implementation detail, AND
@@ -1049,6 +1067,16 @@ class AIExtractor:
                     return None
                 
                 time.sleep(wait_time)
+
+            except errors.ClientError as e:
+                if getattr(e, "code", None) == 429 or "RESOURCE_EXHAUSTED" in str(e):
+                    wait_time = 60
+                    print(f"DEBUG: 429 RESOURCE_EXHAUSTED, retry {attempt}/{max_retries} in {wait_time}s")
+                    if attempt == max_retries:
+                        return None
+                    time.sleep(wait_time)
+                    continue
+                raise
 
         try:
             return json.loads(response.text)

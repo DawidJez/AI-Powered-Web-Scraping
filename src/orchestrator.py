@@ -31,6 +31,17 @@ class Orchestrator:
     def resolve_scripts(self, url: str, analisys: dict, filter: dict, max_depth: int = 5) -> list:        
         if analisys.get("confidence") == "none":
             raise ValueError(f"DEBUG: nie znaleziono '{filter['name']}' w HTML, evidence: {analisys.get('evidence')}")
+
+        # ti has this problem with disabled inputs with "Filter Input"
+        if "www.ti.com" in url:
+            print("WCHODZE TU KURWA")
+            known_disabled_pattern = "Filter Input"
+
+            if analisys.get("target_script") and known_disabled_pattern in analisys.get("target_script"):
+                print("I TU KURWA")
+                analisys["target_script"] = None
+                analisys["interaction_type"] = "unknown"
+                analisys["gate_needed"] = True
         
         if analisys["gate_script"] and not analisys.get("target_script"):
             scripts = [analisys["gate_script"]]
@@ -50,11 +61,22 @@ class Orchestrator:
                 #   f.write(data_to_search["html"])
 
                 result = self.extractor.find_script(scripts, filter, data_to_search["html"])
-                print(result)
+
+                # ti has this problem with disabled inputs with "Filter Input"
+                print(f"url: {url}")
+                if "www.ti.com" in url:
+                    print("WCHODZE TU KURWA")
+                    known_disabled_pattern = "Filter Input"
+
+                    if result.get("script") and known_disabled_pattern in result.get("script"):
+                        print("I TU KURWA")
+                        result["script"] = None
+                        result["control_type"] = "none"
+                        result["needs_more_depth"] = True
 
                 last_result = result
 
-                if not result or result.get("control_type") == "none":
+                if result["needs_more_depth"] == False and result.get("control_type") == "none":
                     print("DEBUG: AI nie znalazlo nic, przerywam petle")
                     break
 
@@ -169,10 +191,10 @@ class Orchestrator:
 
         # url = "https://www.hebe.pl/wlosy/" -->Strong CloudFlare
         # url = "https://www.ti.com/product-category/rf-microwave/rf-power-detectors/products.html" works great
-        # url = "https://www.ti.com/product-category/sensors/products.html#" --> shit cool
+        url = "https://www.ti.com/product-category/sensors/products.html#" # --> shit cool
         # url = "https://www.analog.com/en/product-category/sensors.html" --> doesnt work that far away from target
         # url = "https://www.analog.com/en/parametricsearch/2476#/"
-        url = "https://www.vishay.com/en/leds/smd/"
+        # url = "https://www.vishay.com/en/leds/smd/"
         user_prompt = ""
 
         start_sample = time.time()
@@ -181,13 +203,17 @@ class Orchestrator:
 
         print(page_sample["page_sample_result"])
         # 1. is the filter name 2. and 3. are help phrases (max 2 help phrases)
-        user_choices = ["Dominant Wavelength Min.", "360"]
+        user_choices = ["Pin count", "OR", "102"]
+        # user_choices = ["Product number", "part number"]
         user_filter_choice = user_choices[0]
-        user_csv_list = ["30", "24"]
-        user_csv_list = ["TMP75","TMP117","TMP275"]
-        user_csv_list= ["ADXRS6"]
-        user_csv_list = ["TLMG1100", "TLMO1000"]
-        user_csv_list = ["360"]
+
+        # user_csv_list = ["30", "24"]
+        # user_csv_list = ["TMP75","TMP117","TMP275"]
+        # user_csv_list= ["ADXRS6"]
+        # user_csv_list = ["TLMG1100", "TLMO1000"]
+        # user_csv_list = ["360"]
+        user_csv_list = ["102"]
+        # user_csv_list = ["TMP75","TMP117","TMP275"]
 
         end_sample = time.time()
         start_analisys = time.time()
