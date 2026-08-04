@@ -461,7 +461,6 @@ class AIExtractor:
 
 
     def analize_html(self, html: str, search_term: str, max_retries: int = 3):
-        
         html_windows = self._extract_html_windows(html, search_term)
 
         if not html_windows:

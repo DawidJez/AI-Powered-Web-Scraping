@@ -191,10 +191,11 @@ class Orchestrator:
 
         # url = "https://www.hebe.pl/wlosy/" -->Strong CloudFlare
         # url = "https://www.ti.com/product-category/rf-microwave/rf-power-detectors/products.html" works great
-        url = "https://www.ti.com/product-category/sensors/products.html#" # --> shit cool
+        #url = "https://www.ti.com/product-category/sensors/products.html#" # --> shit cool
         # url = "https://www.analog.com/en/product-category/sensors.html" --> doesnt work that far away from target
         # url = "https://www.analog.com/en/parametricsearch/2476#/"
         # url = "https://www.vishay.com/en/leds/smd/"
+        url = "https://www.infineon.com/products/battery-management-ics#products"
         user_prompt = ""
 
         start_sample = time.time()
@@ -203,16 +204,18 @@ class Orchestrator:
 
         print(page_sample["page_sample_result"])
         # 1. is the filter name 2. and 3. are help phrases (max 2 help phrases)
-        user_choices = ["Pin count", "OR", "102"]
+        #user_choices = ["Pin count", "OR", "102"]
+        #user_choices = ["Parts", "Filter Parts"]
+        user_choices = ["Part number", "Select", "TLE9012"]
         # user_choices = ["Product number", "part number"]
         user_filter_choice = user_choices[0]
 
         # user_csv_list = ["30", "24"]
         # user_csv_list = ["TMP75","TMP117","TMP275"]
-        # user_csv_list= ["ADXRS6"]
+        user_csv_list= ["TLE9012"]
         # user_csv_list = ["TLMG1100", "TLMO1000"]
         # user_csv_list = ["360"]
-        user_csv_list = ["102"]
+        # user_csv_list = ["102"]
         # user_csv_list = ["TMP75","TMP117","TMP275"]
 
         end_sample = time.time()
