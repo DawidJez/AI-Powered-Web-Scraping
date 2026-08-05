@@ -262,3 +262,25 @@ class FirecrawlClient:
         )
 
         return {"html": result.html}    
+
+    def fetch_with_pagination(self, url: str, actions: list, scripts: list, wait_for: int = 3000):
+
+        actions = []
+        
+        gate_scripts = scripts["gate_scripts"]
+        final_script = scripts["final_script"]
+
+        if gate_scripts:
+            for s in gate_scripts:
+                actions.append({"type": "executeJavascript", "script": s})
+                actions.append({"type": "wait", "milliseconds": 800})
+
+        actions.append({"type": "executeJavascript", "script": final_script})
+        actions.append({"type": "wait", "milliseconds": 800})
+
+        actions.append({"type": "write", "text": item})
+        actions.append({"type": "wait", "milliseconds": 800})
+        actions.append({"type": "press", "key": "Enter"})
+        actions.append({"type": "wait", "milliseconds": 1500})
+
+        return {"html": result.html} 

@@ -254,51 +254,12 @@ class AIExtractor:
             print(f"DEBUG: nie udało się sparsować odpowiedzi: {response.text[:300]}")
             return []
         
-    def extract(self, pages: list[str], user_prompt: str, chunk_size: int = 150_000, search_term: str | None = None) -> list:
-        """Testuje pozbycie się chunkowania, w markdown potrzebne jest analizaowanie przynajmniej pełnej strony, 
-        w chunkowaniu podział mógły zepsuć relacje między rekordami, np. compact entry i detailed block 
-        mogłyby znaleźć się w różnych chunkach i ai miałoby problem z dopasowaniem ich do siebie"""
-        
-        # content = self._clean_html(content)
-        # print(f"DEBUG: cleaned content length = {len(content)}")
-
-        """
-        if len(content) < chunk_size:
-            return self._single_extract(content, user_prompt)
-        
-        chunks = self._chunk_segmentation(content, chunk_size)
-        print(f"DEBUG: split into {len(chunks)} chunks")
-        """
-        if search_term:
-            pages = [c for c in  pages if search_term in c] # pre-filter
-            print(f"DEBUG: after pre-filter by '{search_term}': {len(pages)} relevant pages")
+    def extract(self, filtered_data: dict, user_prompt: str) -> list:
 
         all_records = []
-        batch_size = 5
-        
-        for start in range(0, len(pages), batch_size):
-            batch = pages[start:start + batch_size]
-
-            with ThreadPoolExecutor(min(len(batch), 5)) as thread_executor:
-                threads = {
-                    thread_executor.submit(self._single_extract, page, user_prompt): i
-                    for i, page in enumerate(batch)
-                }
-
-                completed = 0
-                for thread in as_completed(threads):
-                    completed += 1
-                    page_index = threads[thread]
-                    print(f"DEBUG: page {page_index + 1}/{len(pages)} done ({completed}/{len(pages)} total)")
-
-                    all_records.extend(thread.result())
-
-            if start + batch_size < len(pages):
-                print("DEBUG: czekam 60s przed kolejną paczką (limit darmowego API)")
-                time.sleep(60)
+        all_records.append(self._single_extract(filtered_data, user_prompt))
 
         return self._deduplicate(all_records)
-    
 
 
     def suggestion(self, content: str, max_retries: int = 3):
@@ -1064,6 +1025,149 @@ class AIExtractor:
                 if attempt == max_retries:
                     print("DEBUG: The number of attempts has been exhausted; an empty response is returned.")
                     return None
+                
+                time.sleep(wait_time)
+
+            except errors.ClientError as e:
+                if getattr(e, "code", None) == 429 or "RESOURCE_EXHAUSTED" in str(e):
+                    wait_time = 60
+                    print(f"DEBUG: 429 RESOURCE_EXHAUSTED, retry {attempt}/{max_retries} in {wait_time}s")
+                    if attempt == max_retries:
+                        return None
+                    time.sleep(wait_time)
+                    continue
+                raise
+
+        try:
+            return json.loads(response.text)
+        except json.JSONDecodeError:
+            print(f"DEBUG: failed to parse the response: {response.text[:300]}")
+            return None
+
+    def resolve_pagination(self, page_probe: dict, html: str , max_retries: int = 3) -> dict:
+        html_windows = []
+        pagination_search_terms = ["Next", "Next Page", "chevron-right", "pagination-next", page_probe["pagination_evidence"]]
+
+        for term in pagination_search_terms:
+            windows = self._extract_html_windows(html, term)
+            if windows:
+                html_windows.extend(windows)
+
+        if not html_windows:
+            return {"script": None, "confidence": "none", "evidence": "text not found in HTML"}
+        
+        combined_windows = "\n\n".join(
+            f"--- Occurrence {w['occurrence_index']} ---\n{w['fragment']}"
+            for w in html_windows
+        )
+
+        system_instruction = ("""
+            # Role
+            You are given several HTML fragments from a product catalog / data grid page
+            (each labeled with an occurrence_index), gathered around occurrences of
+            pagination-related text or controls (e.g. "Next", a page counter like
+            "Page 1 of 8", pagination icons/buttons). You are also given a page_probe
+            object with metadata already inferred about this page (e.g.
+            total_records_declared, records_per_page_declared, pagination_evidence) -
+            use it as context, not as a literal element to search for in the fragments.
+
+            Your job is to find the control that advances to the NEXT page of results,
+            and how to detect when there is no next page left (the stop condition).
+
+            # Task
+            Review the provided fragments (each labeled with occurrence_index) and determine:
+
+            1. Is there a genuinely interactive element (button, link, role="button", clickable
+               icon, etc.) that advances to the next page of results when clicked? This is
+               usually labeled "Next", "Next Page", ">", a chevron-right icon, or similar -
+               NEVER "Previous"/"Back"/"<" or a specific page number button.
+            2. Does this element expose any signal that indicates it's already on the LAST
+               page (e.g. a "disabled" attribute, a disabled/aria-disabled class, aria-disabled
+               ="true")? If so, report a short script that reads and returns that signal.
+
+            # How to write the scripts
+            Instead of a CSS selector, write a short, standalone JavaScript snippet that finds
+            and interacts with the element directly. Runs via executeJavascript - `document`
+            is available directly.
+
+            - ALWAYS wrap the entire script in an IIFE: (function() { ... })();
+            This prevents "Identifier already declared" errors when multiple scripts run
+            sequentially in the same page context and happen to reuse variable names.
+            - Use document.querySelector/querySelectorAll with real CSS, or text matching where
+            labels aren't cleanly attached via attributes:
+            [...document.querySelectorAll('SOME_CONTAINER_SELECTOR')].find(el => el.textContent.trim() === 'Next')
+            - NEVER use jQuery-style pseudo-selectors (:contains(), :has-text(), :eq()).
+            - Shadow DOM (custom tags with a hyphen, e.g. <ti-button>): you MUST use
+            .shadowRoot.querySelector(...) explicitly - a plain descendant selector never
+            reaches inside a shadow root.
+            - next_button_script's final statement must perform the click (.click()), not
+            just locate the element.
+            - disabled_check_script (if applicable) must be an expression/IIFE that RETURNS
+            a boolean (true if currently disabled/on last page, false otherwise) - it does
+            NOT click anything. Example:
+            (function() {
+                const btn = /* same selector logic as next_button_script */;
+                return !!(btn && (btn.disabled || btn.classList.contains('disabled') || btn.getAttribute('aria-disabled') === 'true'));
+            })();
+
+            # What to avoid
+            - "Previous"/"Back" controls, or numbered page buttons (e.g. a button literally
+              labeled "3") - only the control that moves FORWARD by one page.
+            - A control that navigates to an entirely different page/URL outside the current
+              catalog view (e.g. a breadcrumb link).
+            - Treating a disabled/hidden element as clickable - if the ONLY next-page control
+              you see is already disabled in these fragments, that's a valid finding (it means
+              you're on the last page already) - report it via disabled_check_script returning
+              true, and still return the next_button_script (script is still valid syntax, it
+              just shouldn't be invoked while the disabled state holds).
+
+            # CRITICAL - only ONE control at a time
+            Grids sometimes show multiple pagination controls (e.g. one at the top of the
+            table, one at the bottom). If more than one qualifying "Next" control is visible
+            across fragments, pick ONE consistently (prefer the one closest to the actual data
+            rows / bottom of the table if that's discernible from the fragment, otherwise any
+            one is fine) - do not return multiple scripts.
+
+            If no next-page control is found in these fragments at all, return null for
+            "next_button_script", "none" for "confidence", and explain why in "evidence".
+
+            # Response Format
+            Return only valid JSON:
+            {
+            "next_button_script": string or null,
+            "disabled_check_script": string or null,
+            "confidence": "high" | "low" | "none",
+            "evidence": string
+            }
+        """)
+
+        response = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=f"HTML fragments: {combined_windows}, page sample to check type of pagination: {page_probe}",
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json"
+                    )
+                )
+
+                metadata = response.usage_metadata
+                self.tokens_usage.append({
+                    "prompt_tokens": metadata.prompt_token_count,
+                    "output_tokens": metadata.candidates_token_count,
+                    "total_tokens": metadata.total_token_count
+                })
+                break
+
+            except errors.ServerError as e:
+                wait_time = 2 + 2 ** attempt
+
+                print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
+                if attempt == max_retries:
+                    print("DEBUG: The number of attempts has been exhausted; an empty response is returned.")
+                    return {}
                 
                 time.sleep(wait_time)
 

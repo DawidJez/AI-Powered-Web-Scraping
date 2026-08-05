@@ -1,4 +1,7 @@
 import time
+import json
+from pathlib import Path
+import re
 
 from ai_extractor import AIExtractor
 from firecrawl_client import FirecrawlClient
@@ -151,7 +154,47 @@ class Orchestrator:
 
         filtered_data = self.firecrawl.fetch_filtered_data(url, resolved, filter, csv_list, resolved["available_options"])
 
-        return filtered_data
+        return {
+            "filtered_data": filtered_data,
+            "resolved_scripts": resolved
+            }
+
+    def resolve_pagination(self, url: str, page_sample: dict, html: str) -> dict:
+        safe_url = re.sub(r"[^a-zA-Z0-9_-]", "_", url) # sanitize url to create a valid filename
+
+        filename = Path(f"data/resolved_pagination/resolved_pagination_{safe_url}.json")
+        if filename.exists():
+            return json.loads(filename.read_text(encoding="utf-8"))
+
+        resolved_pagination = self.extractor.resolve_pagination(page_sample, html)
+        with open(f"data/resolved_pagination/resolved_pagination_{safe_url}.json", "w", encoding="utf-8") as f:
+            f.write(json.dumps(resolved_pagination))
+
+        return resolved_pagination
+
+    def extract_data(self, 
+                     url: str, 
+                     filtered_data: dict, 
+                     user_prompt: str, 
+                     csv_list: list, 
+                     resolved_pagination: dict
+                     ):
+        
+        all_results = []
+
+        data = filtered_data["filtered_data"]
+        scripts = filtered_data["resolved_scripts"]
+
+        first_extracted_page = self.extractor.extract(data[0], user_prompt)
+        all_results.append(first_extracted_page["records"])
+
+        if first_extracted_page["paging_needed"] == True:
+
+            new_html_pages = self.firecrawl.fetch_with_pagination(url, scripts, resolved_pagination, csv_list)
+            all_results.append(new_html_pages)
+
+        return all_results
+
 
     def test_filter_finder(self):
         url = "https://www.ti.com/product-category/sensors/products.html"
@@ -222,6 +265,8 @@ class Orchestrator:
         start_analisys = time.time()
 
         filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice)
+        resolved_pagination = self.resolve_pagination(url, page_sample["page_sample_result"], page_sample["html_to_analize"])
+
         print(filter_analisys)
 
         end_analisys = time.time()
@@ -230,7 +275,8 @@ class Orchestrator:
         filtered_data = self.filtered_scraping(
             url, filter_analisys, 
             page_sample["page_sample_result"], 
-            user_csv_list, user_choices
+            user_csv_list, 
+            user_choices
         )
 
         end_filter = time.time()
