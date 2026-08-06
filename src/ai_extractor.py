@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
+from markdownify import markdownify
 
 class AIExtractor:
     def __init__(self, api_key: str | None = None):
@@ -45,109 +46,6 @@ class AIExtractor:
 
         return windows
 
-    """
-    # one thing to keep in mind is to check wether key words like "Status"/"Type" etc. 
-    # are being properly found and if whole html isn't returned by mistake 
-    # because of number of occurrences
-    def _extract_html_windows(self, html: str, search_term: str, window_size: int = 3000, proximity: int = 100) -> list[dict]:
-        soup = BeautifulSoup(html, "html.parser")
-
-        for trash_tag in soup(["script", "style"]):
-            trash_tag.decompose()
-
-        clean_html = soup.prettify()
-        clean_html_lc = clean_html.lower()
-
-        print(f"DEBUG: clean_html length = {len(clean_html)}")
-
-        # words that we will search in html
-        words = re.findall(r"[a-zA-Z0-9]+", search_term.lower())
-        stopwords = {"of", "the", "a", "an", "and", "or", "in", "on", "for", "to", "by"} # mess
-        significant_words = [w for w in words if w not in stopwords and len(w) > 1]
-
-        if not significant_words:
-            significant_words = words # fallback
-
-        print(f"DEBUG: significant_words = {significant_words}")
-
-        hits = []  # list of (position, word)
-
-        for word in significant_words:
-            start_idx = 0
-
-            while True:
-                idx = clean_html_lc.find(word, start_idx)
-                if idx == -1:
-                    break
-
-                hits.append((idx, word))
-                start_idx = idx + len(word)
-
-        print(f"DEBUG: total raw hits = {len(hits)}")
-        for word in significant_words:
-            count = sum(1 for _, w in hits if w == word)
-            print(f"DEBUG:   '{word}' occurred {count} times")
-
-        if not hits:
-            return []
-
-        hits.sort(key=lambda h: h[0])
-
-        unique_words_needed = 1 if len(significant_words) == 1 else 2
-        print(f"DEBUG: unique_words_needed = {unique_words_needed}, proximity = {proximity}")
-
-        cluster_centers = []
-        left = 0
-
-        for right in range(len(hits)):
-            while hits[right][0] - hits[left][0] > proximity:
-                left += 1
-
-            window_words = {w for _, w in hits[left:right + 1]}
-            if len(window_words) >= unique_words_needed:
-                cluster_centers.append(hits[right][0])
-
-        print(f"DEBUG: cluster_centers found (proximity match) = {len(cluster_centers)}")
-
-        if not cluster_centers:
-            word_counts = {}
-            for _, w in hits:
-                word_counts[w] = word_counts.get(w, 0) + 1
-            rarest_word = min(word_counts, key=word_counts.get)
-            cluster_centers = [pos for pos, w in hits if w == rarest_word]
-            print(f"DEBUG: FALLBACK triggered, using rarest word '{rarest_word}' -> {len(cluster_centers)} positions")
-
-        raw_hits = sorted(set(cluster_centers))
-        print(f"DEBUG: unique cluster_center positions = {len(raw_hits)}")
-
-        ranges = []
-        for idx in raw_hits:
-            start_idx = max(0, idx - window_size)
-            end_idx = min(len(clean_html), idx + window_size)
-            ranges.append([start_idx, end_idx])
-
-        ranges.sort(key=lambda r: r[0])
-        merged = [ranges[0]]
-        for start, end in ranges[1:]:
-            if start <= merged[-1][1]:
-                merged[-1][1] = max(merged[-1][1], end)
-            else:
-                merged.append([start, end])
-
-        print(f"DEBUG: ranges before merge = {len(ranges)}, after merge = {len(merged)}")
-        for i, (s, e) in enumerate(merged):
-            print(f"DEBUG:   merged window {i}: [{s}:{e}] = {e - s} chars")
-
-        windows = [
-            {"occurrence_index": i, "fragment": clean_html[start:end]}
-            for i, (start,end) in enumerate(merged)
-        ]
-
-        total_len = sum(len(w["fragment"]) for w in windows)
-        print(f"DEBUG: TOTAL windows = {len(windows)}, TOTAL chars across all windows = {total_len}")
-
-        return windows
-    """
     def _chunk_segmentation(self, load: str, chunk_size: int, overlap: int = 2000) -> list[str]:
         chunks = []
         start = 0
@@ -170,8 +68,12 @@ class AIExtractor:
                 unique.append(r)
         return unique
 
-    def _single_extract(self, content: str, user_prompt: str, max_retries: int = 3):
-        start = time.time()
+    def _single_extract(self, content: dict, user_prompt: str, max_retries: int = 3):
+
+        markdown_content = content.get("markdown")
+        if not markdown_content:
+            markdown_content = markdownify.markdownify(content["html"])
+
         system_instruction = ("""
             # Role
             You are an assistant specialized in extracting structured data from scraped web pages
@@ -212,9 +114,20 @@ class AIExtractor:
             field names. If a field cannot be confidently determined for a record, set it to null -
             never guess or fabricate a value.
 
+            # Pagination detection
+            Separately from record extraction, check if the page shows a page counter
+            (e.g. "Page 1 of 3", "1-50 of 128") anywhere in the content. If found, report
+            the total number of pages as "filtered_page_count" (an integer). If no such
+            counter is visible, set "filtered_page_count" to null - do not guess.
+
             # Response Format
-            Return only valid JSON - a JSON array. No explanations, no Markdown formatting, no extra text.
-            If nothing matches, return [].
+            Return only valid JSON - a single JSON object, no explanations, no Markdown
+            formatting, no extra text:
+            {
+            "records": [ ... array of record objects as described above ... ],
+            "filtered_page_count": integer or null
+            }
+            If no records match, "records" must be [].
         """)
 
         # it is told that free gemini api version is more susceptible for server errors
@@ -222,18 +135,21 @@ class AIExtractor:
             try:
                 response = self.client.models.generate_content(
                     model=self.model,
-                    contents=[f"Searching for: {user_prompt}\n\nContent:\n{content}"],
+                    contents=[f"Searching for: {user_prompt}\n\nContent:\n{markdown_content}"],
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
                         response_mime_type="application/json"
                     )
                 )
-                usage = response.usage_metadata
-                # debug debug
-                print(f"Prompt tokens : {usage.prompt_token_count}")
-                print(f"Output tokens : {usage.candidates_token_count}")
-                print(f"Total tokens  : {usage.total_token_count}")
-                break  # ssuccess
+                metadata = response.usage_metadata
+
+                self.tokens_usage.append({
+                    "prompt_tokens": metadata.prompt_token_count,
+                    "output_tokens": metadata.candidates_token_count,
+                    "total_tokens": metadata.total_token_count
+                })
+                
+                break
             
             except errors.ServerError as e:
                 wait = 2 ** attempt  # 2s, 4s, 8s...
@@ -245,8 +161,15 @@ class AIExtractor:
                 
                 time.sleep(wait)
 
-        end = time.time()
-        print(f"DEBUG: extraction time: {end - start}")
+            except errors.ClientError as e:
+                if getattr(e, "code", None) == 429 or "RESOURCE_EXHAUSTED" in str(e):
+                    wait = 60
+                    print(f"DEBUG: 429 RESOURCE_EXHAUSTED, retry {attempt}/{max_retries} w {wait}s")
+                    if attempt == max_retries:
+                        return {"records": [], "filtered_page_count": None}
+                    time.sleep(wait)
+                    continue
+                raise
             
         try:
             return json.loads(response.text)
@@ -254,13 +177,15 @@ class AIExtractor:
             print(f"DEBUG: nie udało się sparsować odpowiedzi: {response.text[:300]}")
             return []
         
-    def extract(self, filtered_data: dict, user_prompt: str) -> list:
+    def extract(self, filtered_data: dict, user_prompt: str) -> dict:
 
-        all_records = []
-        all_records.append(self._single_extract(filtered_data, user_prompt))
+        result = self._single_extract(filtered_data, user_prompt)
 
-        return self._deduplicate(all_records)
-
+        return {
+            "records": self._deduplicate(result.get("records", [])),
+            "paging_needed": (True if result.get("filtered_page_count") > 1 else False),
+            "page_count": result.get("filtered_page_count")    
+        }
 
     def suggestion(self, content: str, max_retries: int = 3):
 

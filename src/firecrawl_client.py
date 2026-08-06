@@ -262,25 +262,65 @@ class FirecrawlClient:
         )
 
         return {"html": result.html}    
-
-    def fetch_with_pagination(self, url: str, actions: list, scripts: list, wait_for: int = 3000):
+    
+    def fetch_with_pagination(
+            self, 
+            url: str, 
+            scripts: list, 
+            resolved_pagination: dict, 
+            page_count: int, 
+            item: str, 
+            wait_for: int = 3000
+        ):
 
         actions = []
         
         gate_scripts = scripts["gate_scripts"]
         final_script = scripts["final_script"]
+        pagination_script = resolved_pagination["next_button_script"]
 
+        interaction_type = scripts.get("interaction_type")
+        available_options = scripts.get("available_options")
+
+        # executing gate scripts
         if gate_scripts:
             for s in gate_scripts:
                 actions.append({"type": "executeJavascript", "script": s})
                 actions.append({"type": "wait", "milliseconds": 800})
 
-        actions.append({"type": "executeJavascript", "script": final_script})
-        actions.append({"type": "wait", "milliseconds": 800})
+        # executing final script
+        # if single fetch
+        if interaction_type == "type" and final_script:
+            actions.append({"type": "executeJavascript", "script": final_script})
+            actions.append({"type": "wait", "milliseconds": 800})
+            actions.append({"type": "write", "text": item})
+            actions.append({"type": "wait", "milliseconds": 1500})
+        # if category fetch
+        elif available_options:
+            chosen_script = self._resolve_choosen_option(available_options, item)
+            actions.append({"type": "executeJavascript", "script": chosen_script})
+            actions.append({"type": "wait", "milliseconds": 1500})
 
-        actions.append({"type": "write", "text": item})
-        actions.append({"type": "wait", "milliseconds": 800})
-        actions.append({"type": "press", "key": "Enter"})
-        actions.append({"type": "wait", "milliseconds": 1500})
+        else:
+            raise ValueError(f"DEBUG: nie wiem jak zaaplikować filtr dla item='{item}', brak final_script i available_options")
 
-        return {"html": result.html} 
+        # scraping every page except the first one
+        for _ in range(page_count - 1):
+            actions.append({"type": "executeJavascript", "script": pagination_script})
+            actions.append({"type": "wait", "milliseconds": 800})
+            actions.append({"type": "scrape"})
+
+        result = self.app.scrape_url(
+            url=url,
+            formats=['markdown', 'links'],
+            wait_for=wait_for,
+            actions=actions,
+            proxy="auto"
+        )
+        print(result.actions)
+
+        pages = []
+        for scrape in result.actions.scrapes:
+            pages.append({"html": scrape.html, "markdown": None})
+
+        return pages

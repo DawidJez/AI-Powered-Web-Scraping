@@ -172,29 +172,32 @@ class Orchestrator:
 
         return resolved_pagination
 
-    def extract_data(self, 
-                     url: str, 
-                     filtered_data: dict, 
-                     user_prompt: str, 
-                     csv_list: list, 
-                     resolved_pagination: dict
-                     ):
-        
+    def extract_data(
+            self, 
+            url: str, 
+            filtered_data: dict, 
+            user_prompt: str, 
+            csv_list: list, 
+            resolved_pagination: dict
+        ):
         all_results = []
 
         data = filtered_data["filtered_data"]
         scripts = filtered_data["resolved_scripts"]
 
-        first_extracted_page = self.extractor.extract(data[0], user_prompt)
-        all_results.append(first_extracted_page["records"])
+        for item, page_data in zip(csv_list, data):
+            extracted = self.extractor.extract(page_data, user_prompt)
+            all_results.append(extracted["records"])
 
-        if first_extracted_page["paging_needed"] == True:
+            if extracted.get("paging_needed"):
+                page_count = extracted["page_count"]
+                new_html_pages = self.firecrawl.fetch_with_pagination(url, scripts, resolved_pagination, page_count, item)
 
-            new_html_pages = self.firecrawl.fetch_with_pagination(url, scripts, resolved_pagination, csv_list)
-            all_results.append(new_html_pages)
+                for page_html in new_html_pages:
+                    extracted_more = self.extractor.extract(page_html, user_prompt)
+                    all_results.append(extracted_more["records"])
 
         return all_results
-
 
     def test_filter_finder(self):
         url = "https://www.ti.com/product-category/sensors/products.html"
@@ -281,8 +284,17 @@ class Orchestrator:
 
         end_filter = time.time()
 
-        #########   TEMP AI FUNC    #############
-        self.extractor.debug_ask_ai_about_products(filtered_data)
+        start_extract = time.time()
+        extracted_data = self.extract_data(
+            url,
+            filtered_data,
+            user_prompt,
+            user_csv_list,
+            resolved_pagination
+        )
+        print(extracted_data)
+
+        end_extract = time.time()
 
         end_test = time.time()
         ########################    ACTUAL TEST     #################################
@@ -302,6 +314,7 @@ class Orchestrator:
         print(f"DEBUG: suggestion time: {end_sample - start_sample:.2f}s")
         print(f"DEBUG: analisys time: {end_analisys - start_analisys:.2f}s")
         print(f"DEBUG: filtering data time: {end_filter - start_filter:.2f}s")
+        print(f"\nDEBUG: extracting data time: {end_extract - start_extract:.2f}s")
 
 
 
