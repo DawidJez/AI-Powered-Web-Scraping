@@ -37,11 +37,11 @@ class Orchestrator:
 
         # ti has this problem with disabled inputs with "Filter Input"
         if "www.ti.com" in url:
-            print("WCHODZE TU KURWA")
+            
             known_disabled_pattern = "Filter Input"
 
             if analisys.get("target_script") and known_disabled_pattern in analisys.get("target_script"):
-                print("I TU KURWA")
+                
                 analisys["target_script"] = None
                 analisys["interaction_type"] = "unknown"
                 analisys["gate_needed"] = True
@@ -66,13 +66,12 @@ class Orchestrator:
                 result = self.extractor.find_script(scripts, filter, data_to_search["html"])
 
                 # ti has this problem with disabled inputs with "Filter Input"
-                print(f"url: {url}")
                 if "www.ti.com" in url:
-                    print("WCHODZE TU KURWA")
+                    
                     known_disabled_pattern = "Filter Input"
 
                     if result.get("script") and known_disabled_pattern in result.get("script"):
-                        print("I TU KURWA")
+                        
                         result["script"] = None
                         result["control_type"] = "none"
                         result["needs_more_depth"] = True
@@ -95,8 +94,6 @@ class Orchestrator:
 
                 if not result.get("needs_more_depth", False):
                     break
-
-            print(last_result)
 
             final_script = last_result.get("script") if last_result else None
             gate_scripts = scripts[:-1] if final_script and scripts and scripts[-1] == final_script else scripts
@@ -237,11 +234,11 @@ class Orchestrator:
 
         # url = "https://www.hebe.pl/wlosy/" -->Strong CloudFlare
         # url = "https://www.ti.com/product-category/rf-microwave/rf-power-detectors/products.html" works great
-        #url = "https://www.ti.com/product-category/sensors/products.html#" # --> shit cool
+        url = "https://www.ti.com/product-category/sensors/products.html#" # --> shit cool
         # url = "https://www.analog.com/en/product-category/sensors.html" --> doesnt work that far away from target
         # url = "https://www.analog.com/en/parametricsearch/2476#/"
         # url = "https://www.vishay.com/en/leds/smd/"
-        url = "https://www.infineon.com/products/battery-management-ics#products"
+        #url = "https://www.infineon.com/products/battery-management-ics#products"
         user_prompt = ""
 
         start_sample = time.time()
@@ -252,17 +249,16 @@ class Orchestrator:
         # 1. is the filter name 2. and 3. are help phrases (max 2 help phrases)
         #user_choices = ["Pin count", "OR", "102"]
         #user_choices = ["Parts", "Filter Parts"]
-        user_choices = ["Part number", "Select", "TLE9012"]
-        # user_choices = ["Product number", "part number"]
+        #user_choices = ["Part number", "Select", "TLE9012"]
+        user_choices = ["Product number", "part number"]
         user_filter_choice = user_choices[0]
 
         # user_csv_list = ["30", "24"]
-        # user_csv_list = ["TMP75","TMP117","TMP275"]
-        user_csv_list= ["TLE9012"]
+        user_csv_list = ["TMP75","TMP117", "ISO", "TMP"]
+        #user_csv_list= ["TLE9012"]
         # user_csv_list = ["TLMG1100", "TLMO1000"]
         # user_csv_list = ["360"]
         # user_csv_list = ["102"]
-        # user_csv_list = ["TMP75","TMP117","TMP275"]
 
         end_sample = time.time()
         start_analisys = time.time()

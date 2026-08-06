@@ -72,7 +72,7 @@ class AIExtractor:
 
         markdown_content = content.get("markdown")
         if not markdown_content:
-            markdown_content = markdownify.markdownify(content["html"])
+            markdown_content = markdownify(content["html"])
 
         system_instruction = ("""
             # Role

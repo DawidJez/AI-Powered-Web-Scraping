@@ -136,7 +136,7 @@ class FirecrawlClient:
         )
 
         return {
-            "records": result.markdown,
+            "markdown": result.markdown,
             "links": result.links,
             "metadata": result.metadata
         }
@@ -170,7 +170,7 @@ class FirecrawlClient:
         )
 
         return {
-            "records": result.markdown,
+            "markdown": result.markdown,
             "links": result.links,
             "metadata": result.metadata
         }
@@ -208,7 +208,7 @@ class FirecrawlClient:
         )
 
         return {
-            "records": result.markdown,
+            "markdown": result.markdown,
             "links": result.links,
             "metadata": result.metadata
         }
@@ -317,10 +317,9 @@ class FirecrawlClient:
             actions=actions,
             proxy="auto"
         )
-        print(result.actions)
 
         pages = []
-        for scrape in result.actions.scrapes:
-            pages.append({"html": scrape.html, "markdown": None})
+        for scrape in result.actions["scrapes"]:
+            pages.append({"markdown": None, "html": scrape["html"]})
 
         return pages
