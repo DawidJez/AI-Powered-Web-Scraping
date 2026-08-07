@@ -112,10 +112,9 @@ class AIExtractor:
             Find ALL matching records - do not stop after the first match, and do not stop early
             even if you also need to report pagination info below. Record extraction is the
             PRIMARY task and must be fully exhaustive - go through the entire content from top to
-            bottom and extract every single matching record before moving on to anything else.
-            Return a JSON array, one object per record, with keys matching the user's requested
-            field names. If a field cannot be confidently determined for a record, set it to null -
-            never guess or fabricate a value.
+            bottom and extract every single matching record before moving on to anything else,
+            using keys matching the user's requested field names. If a field cannot be
+            confidently determined for a record, set it to null - never guess or fabricate a value.
 
             # Pagination detection
             AFTER you have finished extracting every record above, separately check if the page
@@ -186,10 +185,18 @@ class AIExtractor:
 
         result = self._single_extract(filtered_data, user_prompt)
 
+        if isinstance(result, list):
+            # model sometimes returns array instead of valid json {"records":..., "filtered_page_count":...}
+            records = self._deduplicate(result)
+            page_count = None
+        else:
+            records = self._deduplicate(result.get("records", []))
+            page_count = result.get("filtered_page_count")
+
         return {
-            "records": self._deduplicate(result.get("records", [])),
-            "paging_needed": (True if result.get("filtered_page_count") > 1 else False),
-            "page_count": result.get("filtered_page_count")    
+            "records": records,
+            "paging_needed": (True if page_count > 1 else False),
+            "page_count": page_count   
         }
 
     def suggestion(self, content: str, max_retries: int = 3):

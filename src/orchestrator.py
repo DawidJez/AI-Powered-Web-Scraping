@@ -249,16 +249,9 @@ class Orchestrator:
         # if pdf wanted always include "- Full URL of the PDF datasheet" and "- MPN" (as your producy/part) 
         # so pdf downloader would work
         user_prompt = """
-            The page content already reflects a filtered/paginated view - every record
-            shown belongs to the result set you should extract. Do NOT try to match,
-            filter, or exclude records by MPN - extract EVERY record present in the
-            content, with no exceptions.
-
-            For every record extract:
+            Extract every record from the page content. For each record, return:
 
             - MPN
-            - Product page URL
-            - Product image URL
             - Subcategory
             - Rating
             - Package type
@@ -272,8 +265,12 @@ class Orchestrator:
             - Full URL of the PDF datasheet
             - Full URL of the HTML datasheet
 
-            Do NOT guess or fabricate missing values - use null if a field cannot be
-            confidently determined for a record.
+            The page usually states how many records it contains (e.g. "1-50 of 128",
+            "50 results"). Use that count as a checklist - your records array must
+            contain exactly that many entries for this page. If your count comes up
+            short, go back through the content again before responding.
+
+            Use null for any field you cannot confidently determine - never guess.
         """
 
         start_sample = time.time()
@@ -329,7 +326,7 @@ class Orchestrator:
 
         flat_all_results = [record for sublist in extracted_data for record in sublist]
         self.excel.save(flat_all_results, "data/excel/output.xlsx")
-        self.pdf.download_all(flat_all_results, "Full URL of the PDF datasheet", "MPN")
+        # self.pdf.download_all(flat_all_results, "Full URL of the PDF datasheet", "MPN") -> takes a lot of time, so we skip it for now
 
         end_test = time.time()
         ########################    ACTUAL TEST     #################################
