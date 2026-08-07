@@ -184,6 +184,8 @@ class Orchestrator:
 
         for item, page_data in zip(csv_list, data):
             extracted = self.extractor.extract(page_data, user_prompt)
+            print(f"DEBUG: page1 dla item={item}: len(records)={len(extracted['records'])}, page_count={extracted.get('page_count')}")
+
             all_results.append(extracted["records"])
 
             if extracted.get("paging_needed"):
@@ -192,6 +194,7 @@ class Orchestrator:
 
                 for page_html in new_html_pages:
                     extracted_more = self.extractor.extract(page_html, user_prompt)
+                    print(f"DEBUG: page1 dla item={item}: len(records)={len(extracted_more['records'])}")
                     all_results.append(extracted_more["records"])
 
         return all_results
@@ -239,7 +242,34 @@ class Orchestrator:
         # url = "https://www.analog.com/en/parametricsearch/2476#/"
         # url = "https://www.vishay.com/en/leds/smd/"
         #url = "https://www.infineon.com/products/battery-management-ics#products"
-        user_prompt = ""
+        
+        user_prompt = """
+            The page content already reflects a filtered/paginated view - every record
+            shown belongs to the result set you should extract. Do NOT try to match,
+            filter, or exclude records by MPN - extract EVERY record present in the
+            content, with no exceptions.
+
+            For every record extract:
+
+            - MPN
+            - Product page URL
+            - Product image URL
+            - Subcategory
+            - Rating
+            - Package type
+            - Pin count
+            - TI functional safety category
+            - Operating temperature range (°C)
+            - Package area (mm²)
+            - Package size (L × W) (mm)
+            - Price/Quantity (USD)
+            - Product status
+            - Full URL of the PDF datasheet
+            - Full URL of the HTML datasheet
+
+            Do NOT guess or fabricate missing values - use null if a field cannot be
+            confidently determined for a record.
+        """
 
         start_sample = time.time()
 
@@ -255,6 +285,7 @@ class Orchestrator:
 
         # user_csv_list = ["30", "24"]
         user_csv_list = ["TMP75","TMP117", "ISO", "TMP"]
+        user_csv_list = ["TMP"]
         #user_csv_list= ["TLE9012"]
         # user_csv_list = ["TLMG1100", "TLMO1000"]
         # user_csv_list = ["360"]

@@ -109,16 +109,21 @@ class AIExtractor:
             page (if present) only as a HINT for what fields exist and their expected format -
             never as a guarantee of value order within a detail block.
 
-            Find ALL matching records - do not stop after the first match.
+            Find ALL matching records - do not stop after the first match, and do not stop early
+            even if you also need to report pagination info below. Record extraction is the
+            PRIMARY task and must be fully exhaustive - go through the entire content from top to
+            bottom and extract every single matching record before moving on to anything else.
             Return a JSON array, one object per record, with keys matching the user's requested
             field names. If a field cannot be confidently determined for a record, set it to null -
             never guess or fabricate a value.
 
             # Pagination detection
-            Separately from record extraction, check if the page shows a page counter
-            (e.g. "Page 1 of 3", "1-50 of 128") anywhere in the content. If found, report
-            the total number of pages as "filtered_page_count" (an integer). If no such
-            counter is visible, set "filtered_page_count" to null - do not guess.
+            AFTER you have finished extracting every record above, separately check if the page
+            shows a page counter (e.g. "Page 1 of 3", "1-50 of 128") anywhere in the content. This
+            is a SECONDARY, independent task - it must never cause you to skip, truncate, or stop
+            extracting records early. If a counter is found, report the total number of pages as
+            "filtered_page_count" (an integer). If no such counter is visible, set
+            "filtered_page_count" to null - do not guess.
 
             # Response Format
             Return only valid JSON - a single JSON object, no explanations, no Markdown

@@ -307,7 +307,7 @@ class FirecrawlClient:
         # scraping every page except the first one
         for _ in range(page_count - 1):
             actions.append({"type": "executeJavascript", "script": pagination_script})
-            actions.append({"type": "wait", "milliseconds": 800})
+            actions.append({"type": "wait", "milliseconds": 1500})
             actions.append({"type": "scrape"})
 
         result = self.app.scrape_url(
