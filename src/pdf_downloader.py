@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 
 
@@ -6,8 +7,6 @@ class PDFDownloader:
     def download(self, pdf_url: str, filename: str, output_dir: str = "./data/datasheets") -> str | None:
         if not pdf_url:
             return None
-
-        os.makedirs(output_dir, exist_ok=True)
 
         # link is redirect so we follow it
         # User-Agent so site won't block out request
@@ -21,7 +20,10 @@ class PDFDownloader:
         if not response.content.startswith(b"%PDF-"):
             return None
 
-        safe_filename = filename if filename.endswith(".pdf") else f"{filename}.pdf"
+        safe_filename = re.sub(r"[^a-zA-Z0-9_-]", "_", filename)
+        if not safe_filename.endswith(".pdf"):
+            safe_filename += ".pdf"
+
         path = os.path.join(output_dir, safe_filename)
 
         with open(path, "wb") as f:
@@ -30,11 +32,19 @@ class PDFDownloader:
         return path
 
     def download_all(self, records: list[dict], url_field: str, name_field: str, output_dir: str = "./data/datasheets") -> list[dict]:
-   
+        os.makedirs(output_dir, exist_ok=True)
+
         results = []
         for r in records:
             pdf_url = r.get(url_field)
             name = r.get(name_field, "unknown")
-            path = self.download(pdf_url, name, output_dir)
+
+            try:
+                path = self.download(pdf_url, name, output_dir)
+
+            except Exception as e:
+                print(f"DEBUG: nie udało się pobrać PDF dla '{name}' ({pdf_url}): {e}")
+                path = None
+
             results.append({"name": name, "path": path})
         return results

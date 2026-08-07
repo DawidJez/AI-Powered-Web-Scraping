@@ -36,6 +36,8 @@ class ExcelExporter:
                 cell = ws.cell(row=row_idx, column=col_idx, value=value)
                 cell.font = default_font
 
+        output_path = self._get_unique_path(output_path)
+
         wb.save(output_path)
         return output_path
 
@@ -50,3 +52,16 @@ class ExcelExporter:
             else:
                 flat[key] = value
         return flat
+
+    def _get_unique_path(self, output_path: str) -> str:
+        if not os.path.exists(output_path):
+            return output_path
+
+        base, ext = os.path.splitext(output_path)
+        counter = 1
+        new_path = f"{base} ({counter}){ext}"
+
+        while os.path.exists(new_path):
+            counter += 1
+            new_path = f"{base} ({counter}){ext}"
+        return new_path

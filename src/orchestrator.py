@@ -5,12 +5,15 @@ import re
 
 from ai_extractor import AIExtractor
 from firecrawl_client import FirecrawlClient
-
+from excel_exporter import ExcelExporter
+from pdf_downloader import PDFDownloader
 
 class Orchestrator:
     def __init__(self):
         self.extractor = AIExtractor()
         self.firecrawl = FirecrawlClient()
+        self.excel = ExcelExporter()
+        self.pdf = PDFDownloader()
 
     def page_sample(self, url: str) -> dict:
         """ Fetchers a single/first page from url and asks AI 
@@ -242,7 +245,9 @@ class Orchestrator:
         # url = "https://www.analog.com/en/parametricsearch/2476#/"
         # url = "https://www.vishay.com/en/leds/smd/"
         #url = "https://www.infineon.com/products/battery-management-ics#products"
-        
+
+        # if pdf wanted always include "- Full URL of the PDF datasheet" and "- MPN" (as your producy/part) 
+        # so pdf downloader would work
         user_prompt = """
             The page content already reflects a filtered/paginated view - every record
             shown belongs to the result set you should extract. Do NOT try to match,
@@ -319,9 +324,12 @@ class Orchestrator:
             user_csv_list,
             resolved_pagination
         )
-        print(extracted_data)
 
         end_extract = time.time()
+
+        flat_all_results = [record for sublist in extracted_data for record in sublist]
+        self.excel.save(flat_all_results, "data/excel/output.xlsx")
+        self.pdf.download_all(flat_all_results, "Full URL of the PDF datasheet", "MPN")
 
         end_test = time.time()
         ########################    ACTUAL TEST     #################################
