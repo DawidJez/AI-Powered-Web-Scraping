@@ -1,3 +1,4 @@
+import math
 import time
 import json
 from pathlib import Path
@@ -161,14 +162,32 @@ class Orchestrator:
 
     def resolve_pagination(self, url: str, page_sample: dict, html: str) -> dict:
         safe_url = re.sub(r"[^a-zA-Z0-9_-]", "_", url) # sanitize url to create a valid filename
-
         filename = Path(f"data/resolved_pagination/resolved_pagination_{safe_url}.json")
+        
         if filename.exists():
-            return json.loads(filename.read_text(encoding="utf-8"))
+            age_seconds = time.time() - filename.stat().st_mtime
 
-        resolved_pagination = self.extractor.resolve_pagination(page_sample, html)
-        with open(f"data/resolved_pagination/resolved_pagination_{safe_url}.json", "w", encoding="utf-8") as f:
-            f.write(json.dumps(resolved_pagination))
+            if age_seconds < 86400: # 24h
+                cached = json.loads(filename.read_text(encoding="utf-8"))
+                print(f"cached: {cached}")
+
+                if cached.get("confidence") != "none" and cached.get("next_button_script"):
+                    return cached
+
+        resolved_pagination = self.extractor.resolve_pagination(page_sample, html, url)
+        if "analog.com" in url:
+            resolved_pagination = {
+                "next_button_script": '(function() { document.querySelector(\'button[aria-label="Next page"]\').click(); })();',
+                "disabled_check_script": '(function() { const btn = document.querySelector(\'button[aria-label="Next page"]\'); return !!(btn && btn.disabled); })();',
+                "confidence": "high",
+                "evidence": "hardcoded - virtualized grid, pagination not visible in static HTML/markdown"
+            }
+            
+        print(f"\nresolved_pagination: {resolved_pagination}")
+
+        if resolved_pagination.get("confidence") != "none" and resolved_pagination.get("next_button_script"):
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(json.dumps(resolved_pagination))
 
         return resolved_pagination
 
@@ -191,13 +210,18 @@ class Orchestrator:
 
             all_results.append(extracted["records"])
 
+            if "analog.com" in url and extracted.get("page_count") == None and extracted.get("records") and extracted.get("total_records_declared"):
+                extracted["page_count"] = math.ceil(extracted["total_records_declared"]/len(extracted["records"]))
+                extracted["paging_needed"] = bool(extracted["page_count"] > 1)
+
+            print(f"extracted.get('paging_needed'): {extracted.get('paging_needed')}")
             if extracted.get("paging_needed"):
                 page_count = extracted["page_count"]
                 new_html_pages = self.firecrawl.fetch_with_pagination(url, scripts, resolved_pagination, page_count, item)
 
                 for page_html in new_html_pages:
                     extracted_more = self.extractor.extract(page_html, user_prompt)
-                    print(f"DEBUG: page1 dla item={item}: len(records)={len(extracted_more['records'])}")
+                    print(f"DEBUG: next page dla item={item}: len(records)={len(extracted_more['records'])}")
                     all_results.append(extracted_more["records"])
 
         return all_results
@@ -242,7 +266,7 @@ class Orchestrator:
         # url = "https://www.ti.com/product-category/rf-microwave/rf-power-detectors/products.html" works great
         url = "https://www.ti.com/product-category/sensors/products.html#" # --> shit cool
         # url = "https://www.analog.com/en/product-category/sensors.html" --> doesnt work that far away from target
-        # url = "https://www.analog.com/en/parametricsearch/2476#/"
+        url = "https://www.analog.com/en/parametricsearch/2475#/"
         # url = "https://www.vishay.com/en/leds/smd/"
         #url = "https://www.infineon.com/products/battery-management-ics#products"
 
@@ -272,6 +296,14 @@ class Orchestrator:
 
             Use null for any field you cannot confidently determine - never guess.
         """
+        user_prompt = """
+            Extract every record from the page content.
+
+            The page usually states how many records it contains (e.g. "1-50 of 128",
+            "50 results"). Use that count as a checklist - your records array must
+            contain exactly that many entries for this page. If your count comes up
+            short, go back through the content again before responding.
+        """
 
         start_sample = time.time()
 
@@ -281,13 +313,15 @@ class Orchestrator:
         # 1. is the filter name 2. and 3. are help phrases (max 2 help phrases)
         #user_choices = ["Pin count", "OR", "102"]
         #user_choices = ["Parts", "Filter Parts"]
-        #user_choices = ["Part number", "Select", "TLE9012"]
-        user_choices = ["Product number", "part number"]
+        #user_choices = ["Part Number", "TLM"]
+        #user_choices = ["Product number", "part number"]
+        user_choices = ["Parts", "Filter Parts"]
         user_filter_choice = user_choices[0]
 
         # user_csv_list = ["30", "24"]
         user_csv_list = ["TMP75","TMP117", "ISO", "TMP"]
-        user_csv_list = ["TMP"]
+        user_csv_list = ["ADX"]
+        #user_csv_list = ["TLMY1100"]
         #user_csv_list= ["TLE9012"]
         # user_csv_list = ["TLMG1100", "TLMO1000"]
         # user_csv_list = ["360"]

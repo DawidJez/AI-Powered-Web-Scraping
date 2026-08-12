@@ -17,9 +17,9 @@ class FirecrawlClient:
         actions = []
 
         for _ in range(scroll_rounds):
-            actions.append({"type": "scroll", "direction": "down"})
+            actions.append({"type": "scroll", "direction": "down", "amount": 2000})
             actions.append({"type": "wait", "milliseconds": 800})
-
+            
         result = self.app.scrape_url(
             url=url,
             formats=['markdown', 'html', 'links'],
@@ -134,6 +134,9 @@ class FirecrawlClient:
             actions=actions,
             proxy="auto"
         )
+
+        with open("data/debug_markdown_dump.md", "w", encoding="utf-8") as f:
+            f.write(result.markdown)
 
         return {
             "markdown": result.markdown,

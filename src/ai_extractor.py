@@ -1,3 +1,7 @@
+import math
+from pydoc import html
+from unittest import result
+
 from google import genai
 from google.genai import types
 from google.genai import errors
@@ -67,6 +71,33 @@ class AIExtractor:
                 seen.add(key)
                 unique.append(r)
         return unique
+
+    def _detect_total_records(self, markdown_content: str, max_retries: int = 2) -> int | None:
+        system_instruction = """
+            Look at the page content and find a total item/result count if one is
+            visible (e.g. "1 - 25 of 58 items", "58 results", "Showing 58 products").
+            Return only valid JSON: {"total_records_declared": integer or null}
+            If no such count is visible, return {"total_records_declared": null}.
+        """
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=[f"Content:\n{markdown_content[:3000]}"],  # tylko początek, licznik zwykle na górze
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json"
+                    )
+                )
+                parsed = json.loads(response.text)
+                return parsed.get("total_records_declared")
+            except (errors.ServerError, errors.ClientError, json.JSONDecodeError) as e:
+                print(f"DEBUG: total_records detection failed (attempt {attempt}): {e}")
+                if attempt == max_retries:
+                    return None
+                time.sleep(2)
+        return None
 
     def _single_extract(self, content: dict, user_prompt: str, max_retries: int = 3):
 
@@ -176,26 +207,38 @@ class AIExtractor:
                 raise
             
         try:
-            return json.loads(response.text)
+            parsed = json.loads(response.text)
         except json.JSONDecodeError:
-            print(f"DEBUG: nie udało się sparsować odpowiedzi: {response.text[:300]}")
-            return []
+            if attempt == max_retries:
+                print(f"Nie udane próby: {max_retries} dla parsowania jsona")
+                return {"records": [], "filtered_page_count": None, "total_records_declared": None}
+
+        if not isinstance(parsed, dict) or "records" not in parsed:
+            print(f"DEBUG: model zwrócił zły format (próba {attempt}/{max_retries}), oczekiwano dict z 'records', dostano: {type(parsed)}")
+
+            if attempt == max_retries:
+                print("DEBUG: wyczerpano próby, zwracam pusty wynik")
+
+                return {"records": [], "filtered_page_count": None, "total_records_declared": None}
+
+        return parsed
         
     def extract(self, filtered_data: dict, user_prompt: str) -> dict:
 
         result = self._single_extract(filtered_data, user_prompt)
+        records = self._deduplicate(result.get("records", []))
+        page_count = result.get("filtered_page_count")
 
-        if isinstance(result, list):
-            # model sometimes returns array instead of valid json {"records":..., "filtered_page_count":...}
-            records = self._deduplicate(result)
-            page_count = None
-        else:
-            records = self._deduplicate(result.get("records", []))
-            page_count = result.get("filtered_page_count")
+        if not page_count:
+            markdown_content = filtered_data.get("markdown") or markdownify(filtered_data["html"])
+            total_declared = self._detect_total_records(markdown_content)
+
+            if total_declared and records:
+                page_count = math.ceil(total_declared / len(records))
 
         return {
             "records": records,
-            "paging_needed": (True if page_count > 1 else False),
+            "paging_needed": bool(page_count and page_count > 1),
             "page_count": page_count   
         }
 
@@ -443,9 +486,21 @@ class AIExtractor:
             The snippet's final statement must actually perform the interaction (e.g. end with
             `.click()` or `.focus()`), not just locate the element.
 
-            NEVER use jQuery-style pseudo-selectors like :contains(), :has-text(), :eq() -
-            these are not valid CSS/JS and will throw a runtime error. Use .textContent.includes(...)
-            or similar plain JS instead of any pseudo-selector text matching.
+            - NEVER use jQuery-style pseudo-selectors (:contains(), :has-text(), :eq(), :has()) -
+            these are INVALID CSS and will throw "is not a valid selector" at runtime, even
+            though they look like they should work. Use .textContent.includes(...) + .closest()
+            instead. Example - finding a filter icon inside the header cell matching a column
+            name (WRONG vs RIGHT):
+
+            WRONG (throws SyntaxError):
+            document.querySelector('th:has(div:contains("Part Number")) img[alt="filter"]').click();
+
+            RIGHT:
+            (function() {
+                const th = [...document.querySelectorAll('th')].find(el => el.textContent.includes('Part Number'));
+                const icon = th.querySelector('img[alt="filter"]');
+                icon.click();
+            })();
 
             For "type" interactions specifically: the script should ONLY focus or click the
             input element to activate it (e.g. `document.querySelector('...').focus();`).
@@ -704,10 +759,12 @@ class AIExtractor:
             f"--- Occurrence {w['occurrence_index']} ---\n{w['fragment']}"
             for w in html_windows
         )
-
+        """ 
+        # FOR DEBUG
         import time
         with open(f"data/test_files/combined_windows/debug_windows_{time.time()}.txt", "w", encoding="utf-8") as f:
             f.write(combined_windows)
+        """
 
         system_instruction = ("""
             # Role
@@ -772,8 +829,21 @@ class AIExtractor:
             .shadowRoot.querySelector(...) explicitly. A plain descendant selector like
             `ti-search-field input` NEVER works. Example:
             document.querySelector('ti-search-field[placeholder="..."]').shadowRoot.querySelector('input').focus();
-            - NEVER use jQuery-style pseudo-selectors (:contains(), :has-text(), :eq()) - invalid,
-            will throw. Use .textContent.includes(...) instead.
+            - NEVER use jQuery-style pseudo-selectors (:contains(), :has-text(), :eq(), :has()) -
+            these are INVALID CSS and will throw "is not a valid selector" at runtime, even
+            though they look like they should work. Use .textContent.includes(...) + .closest()
+            instead. Example - finding a filter icon inside the header cell matching a column
+            name (WRONG vs RIGHT):
+
+            WRONG (throws SyntaxError):
+            document.querySelector('th:has(div:contains("Part Number")) img[alt="filter"]').click();
+
+            RIGHT:
+            (function() {
+                const th = [...document.querySelectorAll('th')].find(el => el.textContent.includes('Part Number'));
+                const icon = th.querySelector('img[alt="filter"]');
+                icon.click();
+            })();
             - The script's final statement must perform the interaction (.click()/.focus()), not
             just locate the element.
             - For "type" interactions: ONLY focus/click the input to activate it
@@ -981,9 +1051,14 @@ class AIExtractor:
             print(f"DEBUG: failed to parse the response: {response.text[:300]}")
             return None
 
-    def resolve_pagination(self, page_probe: dict, html: str , max_retries: int = 3) -> dict:
+    def resolve_pagination(self, page_probe: dict, html: str , url: str, max_retries: int = 3) -> dict:
         html_windows = []
-        pagination_search_terms = ["Next", "Next Page", "chevron-right", "pagination-next", page_probe["pagination_evidence"]]
+        pagination_search_terms = ["Next", "Next Page", 'aria-label="Next page"', "chevron-right", "pagination-next", 
+                                   "pagination_nav", "pagination__nav", "Page</span>",
+                                   page_probe["pagination_evidence"]
+                                   ]
+        
+        pagination_search_terms = [term for term in pagination_search_terms if term]
 
         for term in pagination_search_terms:
             windows = self._extract_html_windows(html, term)
@@ -1033,7 +1108,21 @@ class AIExtractor:
             - Use document.querySelector/querySelectorAll with real CSS, or text matching where
             labels aren't cleanly attached via attributes:
             [...document.querySelectorAll('SOME_CONTAINER_SELECTOR')].find(el => el.textContent.trim() === 'Next')
-            - NEVER use jQuery-style pseudo-selectors (:contains(), :has-text(), :eq()).
+            - NEVER use jQuery-style pseudo-selectors (:contains(), :has-text(), :eq(), :has()) -
+            these are INVALID CSS and will throw "is not a valid selector" at runtime, even
+            though they look like they should work. Use .textContent.includes(...) + .closest()
+            instead. Example - finding a filter icon inside the header cell matching a column
+            name (WRONG vs RIGHT):
+
+            WRONG (throws SyntaxError):
+            document.querySelector('th:has(div:contains("Part Number")) img[alt="filter"]').click();
+
+            RIGHT:
+            (function() {
+                const th = [...document.querySelectorAll('th')].find(el => el.textContent.includes('Part Number'));
+                const icon = th.querySelector('img[alt="filter"]');
+                icon.click();
+            })();
             - Shadow DOM (custom tags with a hyphen, e.g. <ti-button>): you MUST use
             .shadowRoot.querySelector(...) explicitly - a plain descendant selector never
             reaches inside a shadow root.
@@ -1083,7 +1172,7 @@ class AIExtractor:
             try:
                 response = self.client.models.generate_content(
                     model=self.model,
-                    contents=f"HTML fragments: {combined_windows}, page sample to check type of pagination: {page_probe}",
+                    contents=f"URL of the page: {url}, HTML fragments: {combined_windows}, page sample to check type of pagination: {page_probe}",
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
                         response_mime_type="application/json"
