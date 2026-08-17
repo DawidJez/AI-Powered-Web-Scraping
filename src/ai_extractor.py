@@ -1054,7 +1054,7 @@ class AIExtractor:
     def resolve_pagination(self, page_probe: dict, html: str , url: str, max_retries: int = 3) -> dict:
         html_windows = []
         pagination_search_terms = ["Next", "Next Page", 'aria-label="Next page"', "chevron-right", "pagination-next", 
-                                   "pagination_nav", "pagination__nav", "Page</span>",
+                                   "pagination_nav", "pagination__nav", "Page</span>", "Results per page",
                                    page_probe["pagination_evidence"]
                                    ]
         

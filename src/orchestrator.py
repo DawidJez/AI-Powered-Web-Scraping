@@ -256,6 +256,253 @@ class Orchestrator:
         resolved_scripts = self.resolve_scripts(url, filter_analisys, matched_filter)
         print(f"resolved_scripts: \n {resolved_scripts}")
 
+
+    import os
+import re
+import json
+
+
+def resolve_csv(self, source: str | None = None) -> list[str]:
+    """
+    Turns a CSV/TXT/Excel file into a flat list of string values.
+    If source is None, opens a file picker dialog for the user (falls back to
+    a manual path prompt if no GUI is available, e.g. on a headless server).
+    """
+    if source is None:
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+
+            root = tk.Tk()
+            root.withdraw()
+            source = filedialog.askopenfilename(
+                title="Wybierz plik z listą wartości",
+                filetypes=[
+                    ("CSV / tekst", "*.csv *.txt"),
+                    ("Excel", "*.xlsx *.xls"),
+                    ("Wszystkie pliki", "*.*"),
+                ],
+            )
+            root.destroy()
+        except Exception:
+            print("DEBUG: nie udało się otworzyć okna wyboru pliku, wpisz ścieżkę ręcznie.")
+            source = None
+
+        if not source:
+            source = input("Podaj ścieżkę do pliku: ").strip()
+
+        if not source:
+            return []
+
+    ext = os.path.splitext(source)[1].lower()
+
+    if ext in (".csv", ".txt"):
+        with open(source, encoding="utf-8") as f:
+            content = f.read()
+        items = [x.strip() for x in re.split(r"[,;\n]", content) if x.strip()]
+
+    elif ext in (".xlsx", ".xls"):
+        import openpyxl
+        wb = openpyxl.load_workbook(source, data_only=True)
+        ws = wb.active
+        items = []
+        for row in ws.iter_rows():
+            for cell in row:
+                if cell.value is not None and str(cell.value).strip():
+                    items.append(str(cell.value).strip())
+
+    else:
+        raise ValueError(f"Nieobsługiwany format pliku: '{ext}'. Użyj .csv, .txt, .xlsx lub .xls.")
+
+    return items
+
+
+def _print_sample(self, page_sample_result: dict):
+    """Readable, non-technical summary of what the probe found on the page."""
+    print("\n" + "=" * 60)
+    print("PODGLĄD STRONY")
+    print("=" * 60)
+
+    summary = page_sample_result.get("non_dev_summary")
+    if summary:
+        print(f"\n{summary}\n")
+
+    fields = page_sample_result.get("available_fields")
+    if fields:
+        print("Dostępne pola:")
+        for f in fields:
+            print(f"  - {f}")
+
+    filter_options = page_sample_result.get("filter_options")
+    if filter_options:
+        print("\nPola, po których można filtrować:")
+        for opt in filter_options:
+            print(f"  - {opt.get('name')}")
+
+    print("=" * 60 + "\n")
+
+
+    def run(self):
+        """
+        Interactive entrypoint - the whole program lives here. Walks the user
+        through providing a URL, choosing what to search for, what fields to
+        extract, and where to save the result.
+        """
+        print("=== Narzędzie do pobierania danych produktowych ===\n")
+
+        url = input("Podaj adres URL strony: ").strip()
+
+        print("\nAnalizuję stronę, chwila...")
+        page_sample = self.page_sample(url)
+        self._print_sample(page_sample["page_sample_result"])
+
+        print("Jak chcesz podać listę wartości do wyszukania?")
+        print("  1. Wpisać ręcznie (wartości oddzielone przecinkami)")
+        print("  2. Wybrać plik z komputera (CSV / TXT / Excel)")
+        choice = input("Wybierz 1 lub 2: ").strip()
+
+        if choice == "2":
+            user_csv_list = self.resolve_csv()
+        else:
+            raw = input("Wpisz wartości oddzielone przecinkami: ")
+            user_csv_list = [x.strip() for x in raw.split(",") if x.strip()]
+
+        if not user_csv_list:
+            print("Nie podano żadnych wartości do wyszukania - przerywam.")
+            return
+
+        print(f"\nPrzyjęto {len(user_csv_list)} wartości: {user_csv_list}")
+
+        filter_name = input("\nPodaj nazwę pola filtra, po którym szukać (np. 'Product number'): ").strip()
+        hint1 = input("Opcjonalne słowo pomocnicze 1 (Enter aby pominąć): ").strip()
+        hint2 = input("Opcjonalne słowo pomocnicze 2 (Enter aby pominąć): ").strip()
+        user_filter_choice = [filter_name] + [h for h in (hint1, hint2) if h]
+
+        print("\nCo chcesz wyciągnąć z każdego znalezionego produktu? (opisz swobodnie, np. 'numer, cena, obudowa')")
+        user_prompt = input("> ").strip()
+
+        output_path = input("\nGdzie zapisać wynik? [Enter = data/excel/output.xlsx]: ").strip()
+        if not output_path:
+            output_path = "data/excel/output.xlsx"
+
+        pdf_choice = input("Czy pobrać też karty katalogowe PDF? (t/n) [n]: ").strip().lower()
+        download_pdfs = pdf_choice in ("t", "tak", "y", "yes")
+
+        print("\nPobieram dane, to może chwilę potrwać...\n")
+
+        filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice[0])
+        resolved_pagination = self.resolve_pagination(url, page_sample["page_sample_result"], page_sample["html_to_analize"])
+
+        filtered_data = self.filtered_scraping(
+            url, filter_analisys,
+            page_sample["page_sample_result"],
+            user_csv_list,
+            user_filter_choice
+        )
+
+        extracted_data = self.extract_data(
+            url,
+            filtered_data,
+            user_prompt,
+            user_csv_list,
+            resolved_pagination
+        )
+
+        flat_all_results = [record for sublist in extracted_data for record in sublist]
+
+        if not flat_all_results:
+            print("Brak rekordów do zapisania - sprawdź filtr/pole/wartości i spróbuj ponownie.")
+            return
+
+        self.excel.save(flat_all_results, output_path)
+        print(f"Zapisano {len(flat_all_results)} rekordów do: {output_path}")
+
+        if download_pdfs:
+            print("Pobieram karty katalogowe PDF...")
+            self.pdf.download_all(flat_all_results, "Full URL of the PDF datasheet", "MPN")
+            print("Pobieranie PDF zakończone.")
+
+        return {
+            "output_path": output_path,
+            "record_count": len(flat_all_results),
+            "records": flat_all_results
+        }
+
+    def run_debug(self, url: str, user_prompt: str, user_filter_choice: list, user_csv_list: list, output_path: str = "data/excel/output.xlsx", download_pdfs: bool = False):
+        """
+        Almost same as run() (), but with debug prints and timing at every stage - use during
+        development/testing to see what's happening at each step.
+        """
+        start_test = time.time()
+        print("DEBUG: Start of the test")
+
+        start_sample = time.time()
+        page_sample = self.page_sample(url)
+        print(page_sample["page_sample_result"])
+        end_sample = time.time()
+
+        start_analisys = time.time()
+        filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice[0])
+        resolved_pagination = self.resolve_pagination(url, page_sample["page_sample_result"], page_sample["html_to_analize"])
+        print(filter_analisys)
+        end_analisys = time.time()
+
+        start_filter = time.time()
+        filtered_data = self.filtered_scraping(
+            url, filter_analisys,
+            page_sample["page_sample_result"],
+            user_csv_list,
+            user_filter_choice
+        )
+        end_filter = time.time()
+
+        start_extract = time.time()
+        extracted_data = self.extract_data(
+            url,
+            filtered_data,
+            user_prompt,
+            user_csv_list,
+            resolved_pagination
+        )
+        end_extract = time.time()
+
+        flat_all_results = [record for sublist in extracted_data for record in sublist]
+
+        if not flat_all_results:
+            raise ValueError("Brak rekordów do zapisania - sprawdź filtr/pole/URL")
+
+        self.excel.save(flat_all_results, output_path)
+
+        if download_pdfs:
+            self.pdf.download_all(flat_all_results, "Full URL of the PDF datasheet", "MPN")
+
+        end_test = time.time()
+
+        prompt_tokens = sum(t["prompt_tokens"] for t in self.extractor.tokens_usage)
+        output_tokens = sum(t["output_tokens"] for t in self.extractor.tokens_usage)
+        total_tokens = sum(t["total_tokens"] for t in self.extractor.tokens_usage)
+
+        print("\n===== DEBUG: TOKEN USAGE =====")
+        print("\n=== GEMINI ===")
+        print(f"Prompt tokens : {prompt_tokens:,}")
+        print(f"Output tokens : {output_tokens:,}")
+        print(f"Total tokens  : {total_tokens:,}")
+
+        print(f"\nDEBUG: test time: {end_test - start_test}")
+        print(f"DEBUG: suggestion time: {end_sample - start_sample:.2f}s")
+        print(f"DEBUG: analisys time: {end_analisys - start_analisys:.2f}s")
+        print(f"DEBUG: filtering data time: {end_filter - start_filter:.2f}s")
+        print(f"\nDEBUG: extracting data time: {end_extract - start_extract:.2f}s")
+
+        return {
+            "output_path": output_path,
+            "record_count": len(flat_all_results),
+            "records": flat_all_results
+        }
+
+
+
+
     def test(self):
         ########################    ACTUAL TEST     #################################
         start_test = time.time()
@@ -269,6 +516,7 @@ class Orchestrator:
         url = "https://www.analog.com/en/parametricsearch/2475#/"
         # url = "https://www.vishay.com/en/leds/smd/"
         #url = "https://www.infineon.com/products/battery-management-ics#products"
+        url = "https://www.infineon.com/products/isolation/digital-isolators#products"
 
         # if pdf wanted always include "- Full URL of the PDF datasheet" and "- MPN" (as your producy/part) 
         # so pdf downloader would work
@@ -315,12 +563,26 @@ class Orchestrator:
         #user_choices = ["Parts", "Filter Parts"]
         #user_choices = ["Part Number", "TLM"]
         #user_choices = ["Product number", "part number"]
-        user_choices = ["Parts", "Filter Parts"]
+        user_choices = ["Qualification", "Select", "Industrial"]
         user_filter_choice = user_choices[0]
 
         # user_csv_list = ["30", "24"]
         user_csv_list = ["TMP75","TMP117", "ISO", "TMP"]
-        user_csv_list = ["ADX"]
+        user_csv_list = [
+            "4DIR0400H",
+            "4DIR0400HA",
+            "4DIR0401H",
+            "4DIR0401HA",
+            "4DIR1400H",
+            "4DIR1400HA",
+            "4DIR1401H",
+            "4DIR1401HA",
+            "4DIR1420H",
+            "4DIR1420HA",
+            "4DIR1421H",
+            "4DIR1421HA"
+        ]
+        user_csv_list = ["Industrial"]
         #user_csv_list = ["TLMY1100"]
         #user_csv_list= ["TLE9012"]
         # user_csv_list = ["TLMG1100", "TLMO1000"]

@@ -1,4 +1,4 @@
-firecrawl_client.py
+firecrawl-py
 beautifulsoup4
 google-genai
 openpyxl

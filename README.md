@@ -1,116 +1,143 @@
-# AI-powered web scraping
+# AI-Powered Web Scraping Pipeline
 
+An AI-driven scraping tool for electronics component catalog pages (Texas Instruments,
+Vishay, Analog Devices, Infineon...). Given a URL, a natural-language description of what
+to extract, and a filter value/list, it navigates the page's filter UI, paginates through
+results, and exports structured product data to Excel (with optional PDF datasheet
+downloads) — without hardcoded selectors for the general case.
 
+## How it works
 
-## Getting started
+The pipeline orchestrates two AI-driven layers (Gemini) against a browser-automation
+layer (Firecrawl):
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+1. **Probe** (`page_sample`) - takes a first look at the page and infers its structure:
+   available fields, whether pagination/filtering exists, filter cardinality per field
+   (`identifier` vs `category`), and a human-readable summary.
+2. **Filter resolution** (`search_for_filters` / `resolve_selectors`) - two AI prompts
+   find the actual JS needed to open and interact with the filter UI for a given field
+   (gate script + target script, or a list of clickable options for category-type
+   filters). Handles AG Grid quirks, Shadow DOM web components, and React-controlled
+   inputs that ignore plain `.value` assignment.
+3. **Pagination resolution** (`resolve_pagination`) - a dedicated, shorter AI prompt
+   finds the "next page" control and (when visible) a disabled-state check, cached to
+   disk per URL for 24h.
+4. **Filtered scraping** (`fetch_filtered_data`) - applies the resolved filter script(s)
+   for each value in the input list and scrapes the resulting page.
+5. **Extraction** (`extract`) - a third AI call reads the scraped Markdown/HTML and pulls
+   out the fields the user asked for, one record per match.
+6. **Pagination loop** (`fetch_with_pagination` / `extract_data`) - if a page's record
+   count matches its declared total, the pipeline re-applies the filter and paginates
+   (multiple `scrape` actions inside a single Firecrawl session) until all records are
+   collected.
+7. **Export** - flattened records go to `.xlsx` via `openpyxl`; optionally, PDF
+   datasheets are downloaded per record.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## Requirements
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/lakelake-group/ai-powered-web-scraping.git
-git branch -M main
-git push -uf origin main
+firecrawl-py
+beautifulsoup4
+google-genai
+openpyxl
+markdownify
+requests
 ```
 
-## Integrate with your tools
-
-* [Set up project integrations](https://gitlab.com/lakelake-group/ai-powered-web-scraping/-/settings/integrations)
-
-## Collaborate with your team
-
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-At this point im pointing to let ai extract the wanted records from html with every request;
-Trying to reduce token usage and costs by searching the record headers in html chunk before ai will get to it (I belive markdown is better option for this but it has different size than the html form) 
-IMPROVEMENT: ai extracts once a day or a week the html data and extracts all records from it
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-```
-CSV z listą terminów (np. 50 MPN-ów / nazw)
-        ↓
-lista URL-i do przetworzenia (jeden albo wiele, per use case)
-        ↓
-DLA KAŻDEGO URL osobno:
-    1. Firecrawl pobiera pierwszą stronę (lekko)
-            ↓
-    2. AI: jakie filtry/pola dostępne + czy da się zawęzić (URL param / actions / brak)
-            ↓
-    3. Jeśli można zawęzić -> filtruj przed pełnym scrapem (mniej stron)
-       Jeśli nie -> pełna paginacja (fallback, Twój obecny mechanizm)
-            ↓
-    4. AIExtractor.extract(pages, prompt_z_CAŁĄ_listą_terminów, search_terms=lista)
-       -> jedno przejście przez strony, nie pętla per termin
-            ↓
-    5. Rekordy z tego URL trafiają do zbiorczej listy (z dodatkową kolumną "source_url")
-        ↓
-PO WSZYSTKICH URL-ach:
-    Excel (jeden zbiorczy plik, albo osobne arkusze per URL jeśli struktury pól się różnią)
-    PDF downloader na zebranych linkach
+Install with:
+```bash
+pip install -r requirements.txt --break-system-packages
 ```
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+### Environment / accounts
+- A Firecrawl API key (browser automation + scraping).
+- A Google Gemini API key. Working free-tier models on this account:
+  `gemini-flash-latest`, `gemini-3.5-flash`, `gemini-3.1-flash-lite`.
+  Newer aliases (e.g. `gemini-3.6-flash`) may silently swap in with a different,
+  stricter free-tier rate limit - pin an explicit model string rather than relying on
+  `-latest` if you hit unexpected 429s.
 
 ## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+The whole program lives inside `orchestrator.run()` - it's fully interactive and walks
+the user through every step via prompts in the terminal. No parameters to fill in code.
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+```python
+orchestrator = Orchestrator(...)
+orchestrator.run()
+```
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+Running it looks like this:
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+1. **URL** - paste the catalog page URL.
+2. **Page preview** - a readable summary of what was found on the page (available
+   fields, filterable fields) is printed for a sanity check.
+3. **Values to search for** - choose to either type them directly (comma-separated),
+   or pick a file from disk via a file picker window (`.csv`/`.txt`/`.xlsx`/`.xls`).
+   A plain CSV/TXT file should just be a flat, comma-separated list:
+   `item1, item2, item3, ...`
+4. **Filter field** - the name of the field to filter by (e.g. `Product number`),
+   plus up to two optional hint words if the field name is ambiguous on the page.
+5. **What to extract** - a free-text description of which fields to pull per record
+   (e.g. "numer, cena, obudowa, temperatura pracy").
+6. **Output path** - where to save the `.xlsx` (defaults to `data/excel/output.xlsx`
+   if left blank).
+7. **PDF datasheets** - optionally download each record's PDF datasheet too (off by
+   default - it's slow).
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+The result is also returned as a dict (`output_path`, `record_count`, `records`) for
+anyone calling `run()` from other code rather than a terminal.
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+### Filter field + hints
+The field name should match what's visible on the page's filter UI (column header,
+filter panel label, etc.). The two optional hint words help the AI disambiguate when
+a field name is reused or unclear - e.g. `Pin count` + hints `OR` / `102` when the page
+has both a filter mode toggle and example values nearby.
 
-## License
-For open source projects, say how it is licensed.
+### Values file format
+Flat list, comma/semicolon/newline separated - e.g. a `.csv`/`.txt` with
+`TMP75, TMP117, ISOTMP35`. Excel files are also supported: every non-empty cell across
+all rows/columns is read as one value.
 
-## Project status
-VIP
+One fetch is performed per value - for `identifier` cardinality fields (e.g. a part
+number search box) each value is typed in; for `category` fields (e.g.
+checkboxes/dropdowns) each value is fuzzy-matched against the available options.
+
+## Known limitations / in-progress work
+
+- **Range slider filters** are not yet supported (identified gap, not implemented).
+- **Site-specific patches**: `analog.com`'s parametric search grid is virtualized and
+  doesn't expose pagination controls or page counts in the static HTML/Markdown, so
+  both the next-button script and the total-record-count detection use dedicated,
+  hardcoded logic for that domain rather than the general AI-driven resolver.
+- **Generalization beyond TI** is intentionally incremental - Vishay and Analog Devices
+  work but required their own debugging passes (React-controlled selects, virtualized
+  grids); Infineon is untested as of this writing.
+- AI selector resolution is **not fully deterministic** - the same prompt can
+  occasionally pick an invalid element (e.g. a disabled input) on one run and the
+  correct one on the next. Defensive checks exist in the orchestrator
+  (`known_disabled_pattern`) for known problem cases, but this class of bug can
+  resurface on new pages/fields.
+
+## Architecture notes for contributors
+
+- **Never trust the model's response shape blindly.** Every AI JSON call is validated
+  (`isinstance(parsed, dict)` + expected keys) inside its retry loop - a malformed
+  response is treated the same as a parse failure and retried, not silently degraded.
+- **Prompts are kept single-purpose.** Cramming multiple tasks into one AI call (e.g.
+  "extract records AND count pages AND count total items") reliably degrades the
+  primary task's completeness. Secondary info (page counts, totals) is extracted via
+  separate, cheap, dedicated calls when it can't be derived deterministically.
+- **IIFE-wrap every generated JS script.** Multiple `executeJavascript` actions share
+  one page-level scope in a single Firecrawl session; unwrapped `const`/`let` across
+  scripts throws `Identifier already declared`.
+- **Scope selectors through unique context**, never through repeated CSS classes alone
+  (AG Grid renders the same filter classes once per column) - match via header text or
+  a shared positional attribute (e.g. `aria-colindex`) instead.
+- **React-controlled inputs ignore plain `.value =` assignment.** Single dropdowns need
+  a native-setter workaround; multi-select listboxes need a native-setter "prime" step
+  followed by a synthetic click on the target `<option>`.
+- Gemini's free-tier rate limit is **per-minute input tokens**, not a simple daily
+  total - bursts of large-HTML prompts in quick succession can trip it well before any
+  dashboard total looks concerning. Handle `errors.ClientError` (429) with a real
+  retry/backoff, not just `errors.ServerError`.
