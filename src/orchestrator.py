@@ -3,6 +3,7 @@ import time
 import json
 from pathlib import Path
 import re
+import os
 
 from ai_extractor import AIExtractor
 from firecrawl_client import FirecrawlClient

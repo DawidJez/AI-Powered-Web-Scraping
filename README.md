@@ -1,143 +1,361 @@
 # AI-Powered Web Scraping Pipeline
 
-An AI-driven scraping tool for electronics component catalog pages (Texas Instruments,
-Vishay, Analog Devices, Infineon...). Given a URL, a natural-language description of what
-to extract, and a filter value/list, it navigates the page's filter UI, paginates through
-results, and exports structured product data to Excel (with optional PDF datasheet
-downloads) — without hardcoded selectors for the general case.
+This repository is a prototype for scraping dynamic product catalog pages using a mix of:
 
-## How it works
+- browser automation with Firecrawl
+- AI-based page understanding with Gemini
+- JavaScript-driven filter and pagination handling
+- Excel export and optional PDF datasheet download
 
-The pipeline orchestrates two AI-driven layers (Gemini) against a browser-automation
-layer (Firecrawl):
+It is designed for catalog-like websites where the product list is rendered dynamically and the filter UI is not simple static HTML. Typical examples are electronics distributor pages and parametric search grids.
 
-1. **Probe** (`page_sample`) - takes a first look at the page and infers its structure:
-   available fields, whether pagination/filtering exists, filter cardinality per field
-   (`identifier` vs `category`), and a human-readable summary.
-2. **Filter resolution** (`search_for_filters` / `resolve_selectors`) - two AI prompts
-   find the actual JS needed to open and interact with the filter UI for a given field
-   (gate script + target script, or a list of clickable options for category-type
-   filters). Handles AG Grid quirks, Shadow DOM web components, and React-controlled
-   inputs that ignore plain `.value` assignment.
-3. **Pagination resolution** (`resolve_pagination`) - a dedicated, shorter AI prompt
-   finds the "next page" control and (when visible) a disabled-state check, cached to
-   disk per URL for 24h.
-4. **Filtered scraping** (`fetch_filtered_data`) - applies the resolved filter script(s)
-   for each value in the input list and scrapes the resulting page.
-5. **Extraction** (`extract`) - a third AI call reads the scraped Markdown/HTML and pulls
-   out the fields the user asked for, one record per match.
-6. **Pagination loop** (`fetch_with_pagination` / `extract_data`) - if a page's record
-   count matches its declared total, the pipeline re-applies the filter and paginates
-   (multiple `scrape` actions inside a single Firecrawl session) until all records are
-   collected.
-7. **Export** - flattened records go to `.xlsx` via `openpyxl`; optionally, PDF
-   datasheets are downloaded per record.
+Important: this project is still an experimental automation pipeline, not a polished production-ready product. It already contains working patterns, but it also contains site-specific workarounds and areas that still need generalization.
 
-## Requirements
+---
 
-```
-firecrawl-py
-beautifulsoup4
-google-genai
-openpyxl
-markdownify
-requests
-```
+## What this project is trying to do
 
-Install with:
+The system takes a website URL, a list of search values, and a prompt describing what to extract, then tries to:
+
+1. inspect the page structure
+2. find filterable fields
+3. resolve the JavaScript needed to interact with those filters
+4. apply the search values
+5. scrape the filtered results
+6. extract structured records with AI
+7. handle pagination if required
+8. save the output to Excel
+9. optionally download datasheet PDFs
+
+This is useful when a website exposes product data through grid interfaces, custom filters, and JavaScript-rendered components.
+
+---
+
+## How to navigate this repo
+
+If you are new to the project, this is the most useful order to read the files:
+
+- `src/orchestrator.py`  
+  This is the main orchestration layer. It is the best place to understand the overall flow.
+
+- `src/firecrawl_client.py`  
+  This file contains the browser automation logic and the page-fetching actions.
+
+- `src/ai_extractor.py`  
+  This file contains the Gemini prompt logic for page reconnaissance, filter analysis, pagination detection, and record extraction.
+
+- `src/excel_exporter.py`  
+  Saves structured output to Excel.
+
+- `src/pdf_downloader.py`  
+  Downloads PDFs for matched records.
+
+- `src/product_finder.py`  
+  This is a more specific/older parser used for some TI-style pages. It is useful as a reference but is not the main general solution.
+
+- `src/main.py`  
+  Older prototype script showing a manual flow and AI-vs-hardcoded comparison.
+
+- `src/test_orchestrator.py`  
+  Small runner for testing the orchestrator flow.
+
+- `data/`  
+  Sample HTML, markdown, debug dumps, and cached pagination results used during development.
+
+---
+
+## How the application should work
+
+The real flow is mostly orchestrated by `Orchestrator`.
+
+### 1. Page reconnaissance
+
+`page_sample()` fetches the page and asks the AI to understand:
+
+- what the page is about
+- which data fields appear to exist
+- which fields are likely filterable
+- whether records repeat on the page
+- whether pagination may be needed
+
+This is the “understand the page before acting on it” phase.
+
+### 2. Filter discovery
+
+`search_for_filters()` inspects the page HTML and tries to locate the correct field the user wants to filter by.
+
+This step is harder than it sounds because page filters often use:
+
+- custom search boxes
+- dropdowns
+- checkbox groups
+- AG Grid filters
+- React-controlled inputs
+- hidden or disabled elements
+
+### 3. Script resolution
+
+`resolve_scripts()` tries to recover the JavaScript needed to:
+
+- open a filter
+- type a value
+- select an option
+- trigger the UI update
+- wait for the page to reload data
+
+This is the most fragile part of the system. It relies on generated JavaScript snippets that must work against the actual DOM of the target page.
+
+### 4. Filtered data fetch
+
+`filtered_scraping()` applies the resolved logic to each product value and captures the filtered page result.
+
+### 5. Record extraction
+
+`extract_data()` sends the page content to the AI and asks it to return structured records matching the user prompt.
+
+This step decides what the final data looks like: product number, category, price, package, etc.
+
+### 6. Pagination loop
+
+If more pages are available, the code tries to continue fetching results until the list is complete.
+
+This is still one of the weakest parts of the repo because many catalog grids implement pagination in unusual ways.
+
+### 7. Export
+
+The records are flattened and saved to Excel via `ExcelExporter`. If the user requests it, PDF datasheets are also downloaded with `PDFDownloader`.
+
+---
+
+## Developer onboarding: how to run it
+
+### 1. Create a virtual environment
+
 ```bash
-pip install -r requirements.txt --break-system-packages
+python -m venv .venv
+source .venv/bin/activate
 ```
 
-### Environment / accounts
-- A Firecrawl API key (browser automation + scraping).
-- A Google Gemini API key. Working free-tier models on this account:
-  `gemini-flash-latest`, `gemini-3.5-flash`, `gemini-3.1-flash-lite`.
-  Newer aliases (e.g. `gemini-3.6-flash`) may silently swap in with a different,
-  stricter free-tier rate limit - pin an explicit model string rather than relying on
-  `-latest` if you hit unexpected 429s.
+### 2. Install dependencies
 
-## Usage
-
-The whole program lives inside `orchestrator.run()` - it's fully interactive and walks
-the user through every step via prompts in the terminal. No parameters to fill in code.
-
-```python
-orchestrator = Orchestrator(...)
-orchestrator.run()
+```bash
+pip install -r requirements.txt
 ```
 
-Running it looks like this:
+### 3. Configure environment variables
 
-1. **URL** - paste the catalog page URL.
-2. **Page preview** - a readable summary of what was found on the page (available
-   fields, filterable fields) is printed for a sanity check.
-3. **Values to search for** - choose to either type them directly (comma-separated),
-   or pick a file from disk via a file picker window (`.csv`/`.txt`/`.xlsx`/`.xls`).
-   A plain CSV/TXT file should just be a flat, comma-separated list:
-   `item1, item2, item3, ...`
-4. **Filter field** - the name of the field to filter by (e.g. `Product number`),
-   plus up to two optional hint words if the field name is ambiguous on the page.
-5. **What to extract** - a free-text description of which fields to pull per record
-   (e.g. "numer, cena, obudowa, temperatura pracy").
-6. **Output path** - where to save the `.xlsx` (defaults to `data/excel/output.xlsx`
-   if left blank).
-7. **PDF datasheets** - optionally download each record's PDF datasheet too (off by
-   default - it's slow).
+The project expects credentials for both:
 
-The result is also returned as a dict (`output_path`, `record_count`, `records`) for
-anyone calling `run()` from other code rather than a terminal.
+- Firecrawl
+- Gemini
 
-### Filter field + hints
-The field name should match what's visible on the page's filter UI (column header,
-filter panel label, etc.). The two optional hint words help the AI disambiguate when
-a field name is reused or unclear - e.g. `Pin count` + hints `OR` / `102` when the page
-has both a filter mode toggle and example values nearby.
+Example:
 
-### Values file format
-Flat list, comma/semicolon/newline separated - e.g. a `.csv`/`.txt` with
-`TMP75, TMP117, ISOTMP35`. Excel files are also supported: every non-empty cell across
-all rows/columns is read as one value.
+```bash
+export FIRECRAWL_API_KEY="your_firecrawl_key"
+export GEMINI_API_KEY="your_gemini_key"
+```
 
-One fetch is performed per value - for `identifier` cardinality fields (e.g. a part
-number search box) each value is typed in; for `category` fields (e.g.
-checkboxes/dropdowns) each value is fuzzy-matched against the available options.
+Or create a `.env` file:
 
-## Known limitations / in-progress work
+```env
+FIRECRAWL_API_KEY=your_firecrawl_key
+GEMINI_API_KEY=your_gemini_key
+```
 
-- **Range slider filters** are not yet supported (identified gap, not implemented).
-- **Site-specific patches**: `analog.com`'s parametric search grid is virtualized and
-  doesn't expose pagination controls or page counts in the static HTML/Markdown, so
-  both the next-button script and the total-record-count detection use dedicated,
-  hardcoded logic for that domain rather than the general AI-driven resolver.
-- **Generalization beyond TI** is intentionally incremental - Vishay and Analog Devices
-  work but required their own debugging passes (React-controlled selects, virtualized
-  grids); Infineon is untested as of this writing.
-- AI selector resolution is **not fully deterministic** - the same prompt can
-  occasionally pick an invalid element (e.g. a disabled input) on one run and the
-  correct one on the next. Defensive checks exist in the orchestrator
-  (`known_disabled_pattern`) for known problem cases, but this class of bug can
-  resurface on new pages/fields.
+### 4. Run the project
 
-## Architecture notes for contributors
+The main prototype entrypoint is:
 
-- **Never trust the model's response shape blindly.** Every AI JSON call is validated
-  (`isinstance(parsed, dict)` + expected keys) inside its retry loop - a malformed
-  response is treated the same as a parse failure and retried, not silently degraded.
-- **Prompts are kept single-purpose.** Cramming multiple tasks into one AI call (e.g.
-  "extract records AND count pages AND count total items") reliably degrades the
-  primary task's completeness. Secondary info (page counts, totals) is extracted via
-  separate, cheap, dedicated calls when it can't be derived deterministically.
-- **IIFE-wrap every generated JS script.** Multiple `executeJavascript` actions share
-  one page-level scope in a single Firecrawl session; unwrapped `const`/`let` across
-  scripts throws `Identifier already declared`.
-- **Scope selectors through unique context**, never through repeated CSS classes alone
-  (AG Grid renders the same filter classes once per column) - match via header text or
-  a shared positional attribute (e.g. `aria-colindex`) instead.
-- **React-controlled inputs ignore plain `.value =` assignment.** Single dropdowns need
-  a native-setter workaround; multi-select listboxes need a native-setter "prime" step
-  followed by a synthetic click on the target `<option>`.
-- Gemini's free-tier rate limit is **per-minute input tokens**, not a simple daily
-  total - bursts of large-HTML prompts in quick succession can trip it well before any
-  dashboard total looks concerning. Handle `errors.ClientError` (429) with a real
-  retry/backoff, not just `errors.ServerError`.
+```bash
+python src/main.py
+```
+
+The more important application pattern is the orchestrator flow, where a user provides:
+
+- the product page URL
+- search values
+- a filter field name
+- extraction prompt
+- output path
+- optional PDF download choice
+
+---
+
+## Typical flow in the interactive app
+
+When the app is used interactively, the expected sequence is:
+
+1. paste a catalog URL
+2. review the page summary
+3. provide product values manually or from a CSV/TXT/XLSX file
+4. choose the field to filter by, for example `Product number`
+5. optionally add hints for ambiguous field names
+6. describe which product attributes to extract
+7. choose an output file path
+8. decide whether to download datasheets
+
+Example value list:
+
+```text
+TMP75, TMP117, ISOTMP35
+```
+
+Example filter input:
+
+- field: `Product number`
+- hint 1: `part`
+- hint 2: `code`
+
+The app then resolves the filter interaction, fetches the matching results, and extracts product records.
+
+---
+
+## What is already working
+
+The project already demonstrates a real concept that works in a useful subset of cases:
+
+- scraping pages with browser automation
+- understanding product pages using AI
+- resolving dynamic search/filter interactions
+- extracting structured product records
+- exporting data to Excel
+- downloading PDFs when data is available
+
+That means the repo is valid as a prototype and useful as a technical foundation.
+
+---
+
+## Most important technical rules for contributors
+
+Before changing behavior in this repo, understand these rules:
+
+- AI output is not trusted blindly; it must be validated
+- the generated JavaScript must be carefully scoped to avoid collisions
+- selectors should not rely only on generic repeated CSS classes
+- React-controlled inputs often ignore plain value assignment and need a workaround
+- pagination and filter logic are highly dependent on the target website structure
+- API rate limits and flaky browser behavior require retries and backoff
+
+These are the main reasons the project is tricky and why some site-specific debugging is necessary.
+
+---
+
+## Known limitations / imperfections
+
+This is one of the most important sections for anyone joining the project.
+
+### 1. The filtering layer is not fully general
+
+The code can handle several patterns, but it is not yet a universal scraper for all catalog sites. Some logic is still site-specific.
+
+### 2. AI-based selector resolution is not deterministic
+
+The model may occasionally choose a stale or incorrect selector. This is one of the biggest quality issues in the project today.
+
+### 3. Pagination is still unreliable in some cases
+
+Pages with virtualized grids, hidden counters, or custom JS navigation still require custom behavior.
+
+### 4. Some filters are still missing
+
+Range-slider or other specialized filter controls are not fully supported yet.
+
+### 5. Some code is intentionally experimental
+
+There are prototype scripts, debug output, and old helper logic still present. That is a sign of a research project in progress, not a finished production system.
+
+---
+
+## What still needs to be developed
+
+This is the roadmap for the next phase of the project.
+
+### High priority
+
+1. Generalize filter logic across more sites
+   - support more filter types
+   - reduce site-specific patches
+   - improve selector reliability
+
+2. Improve pagination handling
+   - detect page count more safely
+   - support virtualized grids better
+   - handle more next-page patterns
+
+3. Harden the AI contract
+   - validate JSON more strictly
+   - add clearer retry logic
+   - handle malformed model output better
+
+4. Add proper CLI/config support
+   - command-line arguments
+   - config files for defaults
+   - logging and debug modes
+
+5. Add automated tests
+   - unit tests for helpers
+   - fixture-based tests with sample HTML pages
+   - regression coverage for known working patterns
+
+6. Reduce hardcoded behavior
+   - move repeated fixes into reusable abstractions
+   - continue converting custom hacks into general logic
+
+### Medium priority
+
+1. better caching for resolved selectors and pagination flow
+2. more robust handling of rate limits
+3. better PDF validation and download reliability
+4. improved record deduplication
+5. export support beyond Excel
+
+### Nice to have
+
+1. dashboard interface for running jobs
+2. batch queue support
+3. better audit logs and provenance
+4. richer diagnostics when a page fails
+5. packaging for cleaner installation and reuse
+
+---
+
+## Best way to debug this repo
+
+When a page fails, the most effective debugging flow is:
+
+1. inspect the page HTML or markdown in `data/`
+2. check whether the filter is present and visible
+3. inspect the orchestrator step that failed
+4. verify whether the generated JavaScript is valid in the browser context
+5. inspect the AI output and confirm the structure before trusting it
+
+A large amount of the project’s issues are not Python exceptions; they are DOM/state issues caused by dynamic websites.
+
+---
+
+## Bottom line
+
+This repository is a valid prototype for AI-assisted scraping of dynamic product catalogs, but it is still under active development.
+
+The biggest engineering tasks are:
+
+- making filter resolution more robust
+- improving pagination for complex grids
+- generalizing across more websites
+- reducing site-specific hacks
+- adding tests and more reliable validation
+
+If you are a new developer, the correct place to start is the orchestrator flow, then Firecrawl, then Gemini, and only then the older helper code or experimental scripts.
+
+---
+
+## Quick summary
+
+- Main orchestration: `src/orchestrator.py`
+- Browser automation: `src/firecrawl_client.py`
+- AI extraction: `src/ai_extractor.py`
+- Excel export: `src/excel_exporter.py`
+- PDF download: `src/pdf_downloader.py`
+- Main prototype script: `src/main.py`
+- Main rough spots: dynamic filters, selector reliability, pagination, and site generalization

@@ -3,3 +3,5 @@ beautifulsoup4
 google-genai
 openpyxl
 markdownify
+requests
+python-dotenv
