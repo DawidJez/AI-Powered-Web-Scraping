@@ -59,7 +59,7 @@ class FirecrawlClient:
 
             all_pages.append({"markdown": result.markdown, "html": result.html})
 
-            print(f"DEBUG: strona {page_num + 1} pobrana")
+            print(f"DEBUG: page {page_num + 1} downloaded")
 
         return all_pages
 
@@ -190,7 +190,7 @@ class FirecrawlClient:
     
     def _category_fetch(self, url: str, scripts: list, choosen_script: str, wait_for: int = 3000) -> dict:
         if not choosen_script:
-            raise ValueError(f"DEBUG: brak choosen_options, nie ma z czego wybrac dla '{choosen_script}'")
+            raise ValueError(f"DEBUG: no chosen_options, nothing to choose from for '{choosen_script}'")
 
         gate_scripts = scripts["gate_scripts"]
         
@@ -305,7 +305,7 @@ class FirecrawlClient:
             actions.append({"type": "wait", "milliseconds": 1500})
 
         else:
-            raise ValueError(f"DEBUG: nie wiem jak zaaplikować filtr dla item='{item}', brak final_script i available_options")
+            raise ValueError(f"DEBUG: don't know how to apply filter for item='{item}', missing final_script and available_options")
 
         # scraping every page except the first one
         for _ in range(page_count - 1):

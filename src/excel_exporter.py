@@ -6,7 +6,7 @@ from openpyxl.styles import Font
 class ExcelExporter:
     def save(self, records: list[dict], output_path: str) -> str:
         if not records:
-            raise ValueError("Brak rekordów do zapisania")
+            raise ValueError("No records to save")
 
         output_dir = os.path.dirname(output_path)
         if output_dir:

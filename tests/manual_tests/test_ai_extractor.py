@@ -8,8 +8,8 @@ URL = "https://www.ti.com/product-category/sensors/products.html"
 
 
 def save_pages(pages: list[dict], output_file: str = OUTPUT_FILE) -> None:
-    """Zapisuje listę stron (markdown) do jednego pliku, oddzielonych separatorem z numerem strony."""
-    print(f"\nZapisuję {len(pages)} stron do {output_file}...")
+    """Writes a list of pages (markdown) into a single file, separated by a page-number separator."""
+    print(f"\nWriting {len(pages)} pages to {output_file}...")
 
     with open(output_file, "w", encoding="utf-8") as f:
         for i, page in enumerate(pages):
@@ -19,11 +19,11 @@ def save_pages(pages: list[dict], output_file: str = OUTPUT_FILE) -> None:
             f.write(page["markdown"])
             f.write("\n")
 
-    print(f"Zapisano: {output_file}")
+    print(f"Saved: {output_file}")
 
 
 def load_pages(input_file: str = OUTPUT_FILE) -> list[str]:
-    """Wczytuje plik zapisany przez save_pages() z powrotem jako list[str] (markdown per strona)."""
+    """Loads the file saved by save_pages() back as list[str] (markdown per page)."""
     with open(input_file, "r", encoding="utf-8") as f:
         content = f.read()
 
@@ -52,13 +52,13 @@ def main():
     client = FirecrawlClient()
     pages = client.fetch_all_pages(URL)
 
-    print(f"\nPobrano łącznie {len(pages)} stron.")
+    print(f"\nDownloaded a total of {len(pages)} pages.")
 
     save_pages(pages)
 
-    print("\nWeryfikacja - wczytuję plik z powrotem...")
+    print("\nVerification - loading the file back...")
     loaded = load_pages()
-    print(f"Wczytano {len(loaded)} stron z pliku (powinno się zgadzać z {len(pages)} pobranymi).")
+    print(f"Loaded {len(loaded)} pages from file (should match the {len(pages)} downloaded).")
     """
     pages = load_pages()
 

@@ -188,18 +188,18 @@ class AIExtractor:
             
             except errors.ServerError as e:
                 wait = 2 ** attempt  # 2s, 4s, 8s...
-                print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} za {wait}s")
+                print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait}s")
 
                 if attempt == max_retries:
-                    print("DEBUG: wyczerpano próby, zwracam pustą listę dla tego chunka")
+                    print("DEBUG: attempts exhausted, returning an empty list for this chunk")
                     return []
-                
+
                 time.sleep(wait)
 
             except errors.ClientError as e:
                 if getattr(e, "code", None) == 429 or "RESOURCE_EXHAUSTED" in str(e):
                     wait = 60
-                    print(f"DEBUG: 429 RESOURCE_EXHAUSTED, retry {attempt}/{max_retries} w {wait}s")
+                    print(f"DEBUG: 429 RESOURCE_EXHAUSTED, retry {attempt}/{max_retries} in {wait}s")
                     if attempt == max_retries:
                         return {"records": [], "filtered_page_count": None}
                     time.sleep(wait)
@@ -210,14 +210,14 @@ class AIExtractor:
             parsed = json.loads(response.text)
         except json.JSONDecodeError:
             if attempt == max_retries:
-                print(f"Nie udane próby: {max_retries} dla parsowania jsona")
+                print(f"Failed attempts: {max_retries} for parsing JSON")
                 return {"records": [], "filtered_page_count": None, "total_records_declared": None}
 
         if not isinstance(parsed, dict) or "records" not in parsed:
-            print(f"DEBUG: model zwrócił zły format (próba {attempt}/{max_retries}), oczekiwano dict z 'records', dostano: {type(parsed)}")
+            print(f"DEBUG: model returned wrong format (attempt {attempt}/{max_retries}), expected dict with 'records', got: {type(parsed)}")
 
             if attempt == max_retries:
-                print("DEBUG: wyczerpano próby, zwracam pusty wynik")
+                print("DEBUG: attempts exhausted, returning empty result")
 
                 return {"records": [], "filtered_page_count": None, "total_records_declared": None}
 

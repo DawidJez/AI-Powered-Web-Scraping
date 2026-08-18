@@ -91,7 +91,7 @@ def main():
     time2 = (end2 - start2)
     print("AI version status: END")
     print(f"Time: {time2}")
-    print(f"\nPorównanie: hardcoded {time1:.2f}s vs AI {time2:.2f}s")
+    print(f"\nComparison: hardcoded {time1:.2f}s vs AI {time2:.2f}s")
 
     excel_exporter = ExcelExporter()
     excel_exporter.save(records, f"data/exel/{product_number}_products.xlsx")

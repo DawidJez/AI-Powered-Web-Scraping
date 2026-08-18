@@ -43,7 +43,7 @@ class PDFDownloader:
                 path = self.download(pdf_url, name, output_dir)
 
             except Exception as e:
-                print(f"DEBUG: nie udało się pobrać PDF dla '{name}' ({pdf_url}): {e}")
+                print(f"DEBUG: failed to download PDF for '{name}' ({pdf_url}): {e}")
                 path = None
 
             results.append({"name": name, "path": path})
