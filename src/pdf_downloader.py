@@ -2,7 +2,7 @@ import os
 import re
 import requests
 
-
+# *THIS CLASS IS WRITTEN BY AI*
 class PDFDownloader:
     def download(self, pdf_url: str, filename: str, output_dir: str = "./data/datasheets") -> str | None:
         if not pdf_url:

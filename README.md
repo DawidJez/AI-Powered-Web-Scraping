@@ -9,7 +9,7 @@ This repository is a prototype for scraping dynamic product catalog pages using 
 
 It is designed for catalog-like websites where the product list is rendered dynamically and the filter UI is not simple static HTML. Typical examples are electronics distributor pages and parametric search grids.
 
-Important: this project is still an experimental automation pipeline, not a polished production-ready product. It already contains working patterns, but it also contains site-specific workarounds and areas that still need generalization.
+Important: this project is still an experimental automation pipeline, not a polished production-ready product. Some changes are needed before general use.
 
 ---
 
@@ -50,17 +50,17 @@ If you are new to the project, this is the most useful order to read the files:
 - `src/pdf_downloader.py`  
   Downloads PDFs for matched records.
 
-- `src/product_finder.py`  
-  This is a more specific/older parser used for some TI-style pages. It is useful as a reference but is not the main general solution.
-
 - `src/main.py`  
-  Older prototype script showing a manual flow and AI-vs-hardcoded comparison.
+  Small runner of orchestrator.
 
 - `src/test_orchestrator.py`  
   Small runner for testing the orchestrator flow.
 
 - `data/`  
-  Sample HTML, markdown, debug dumps, and cached pagination results used during development.
+  Sample HTML, markdown, debug dumps, and cached pagination results used during development will be stored here.
+
+- `tests/manual_tests`
+  Small tests runners used during development. No need to read them, but may help to understand a few concepts.
 
 ---
 
@@ -204,8 +204,8 @@ TMP75, TMP117, ISOTMP35
 Example filter input:
 
 - field: `Product number`
-- hint 1: `part`
-- hint 2: `code`
+- hint 1: `part number`
+- hint 2: `filter by product`
 
 The app then resolves the filter interaction, fetches the matching results, and extracts product records.
 
@@ -247,7 +247,7 @@ This is one of the most important sections for anyone joining the project.
 
 ### 1. The filtering layer is not fully general
 
-The code can handle several patterns, but it is not yet a universal scraper for all catalog sites. Some logic is still site-specific.
+The code can handle several patterns, but it is not yet a perfect universal scraper for all catalog sites. Some logic is still site-specific.
 
 ### 2. AI-based selector resolution is not deterministic
 
@@ -263,7 +263,7 @@ Range-slider or other specialized filter controls are not fully supported yet.
 
 ### 5. Some code is intentionally experimental
 
-There are prototype scripts, debug output, and old helper logic still present. That is a sign of a research project in progress, not a finished production system.
+There are prototype scripts, debug output, and old helper logic still present.
 
 ---
 
@@ -288,10 +288,10 @@ This is the roadmap for the next phase of the project.
    - add clearer retry logic
    - handle malformed model output better
 
-4. Add proper CLI/config support
-   - command-line arguments
-   - config files for defaults
-   - logging and debug modes
+4. More user friendly design
+   - better error messages and diagnostics
+   - more robust handling of missing filters
+   - easier handling of ambiguous field names
 
 5. Add automated tests
    - unit tests for helpers
@@ -324,7 +324,7 @@ This is the roadmap for the next phase of the project.
 
 When a page fails, the most effective debugging flow is:
 
-1. inspect the page HTML or markdown in `data/`
+1. save scraped html/markdown to file in `data/` and inspect it or inspect wanted html elements in browser
 2. check whether the filter is present and visible
 3. inspect the orchestrator step that failed
 4. verify whether the generated JavaScript is valid in the browser context
@@ -346,7 +346,7 @@ The biggest engineering tasks are:
 - reducing site-specific hacks
 - adding tests and more reliable validation
 
-If you are a new developer, the correct place to start is the orchestrator flow, then Firecrawl, then Gemini, and only then the older helper code or experimental scripts.
+If you are a new developer, the correct place to start is the orchestrator flow, then Firecrawl, then Gemini, and only then (optional) the older helper code or experimental scripts.
 
 ---
 
@@ -357,5 +357,5 @@ If you are a new developer, the correct place to start is the orchestrator flow,
 - AI extraction: `src/ai_extractor.py`
 - Excel export: `src/excel_exporter.py`
 - PDF download: `src/pdf_downloader.py`
-- Main prototype script: `src/main.py`
-- Main rough spots: dynamic filters, selector reliability, pagination, and site generalization
+- Runner script: `src/main.py`
+- Main rough spots: dynamic filters, selector reliability, user friendly ui, pagination, and site generalization

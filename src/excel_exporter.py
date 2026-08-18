@@ -3,6 +3,7 @@ import os
 from openpyxl.styles import Font
 
 
+# *THIS CLASS IS WRITTEN MOSTLY BY AI*
 class ExcelExporter:
     def save(self, records: list[dict], output_path: str) -> str:
         if not records:
