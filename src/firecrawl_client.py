@@ -59,8 +59,6 @@ class FirecrawlClient:
 
             all_pages.append({"markdown": result.markdown, "html": result.html})
 
-            print(f"DEBUG: page {page_num + 1} downloaded")
-
         return all_pages
 
     def merge_pages(self, pages: list[dict[str, str]]) -> dict[str, str]:
@@ -81,7 +79,7 @@ class FirecrawlClient:
         }
     
     # gówno nie działa, za wolne, za głupie, za mało kredytów co kolwiek, jebał to pies trzeba własne kuźwa robić, 
-    # niech to szlag jasny trafi (tą linie copilot napisał akurat, wie co jest na rzeczy)
+    # niech to szlag jasny trafi (tę linie copilot napisał akurat, wie co jest na rzeczy)
     def fetch_data_ai(self, url: str, user_prompt: str, page_sample: dict, csv_list: list[str], model: str = "spark-1-pro", max_credits = 300):
         mpns = json.dumps(csv_list)
         print(f"DEBUG: csv_list = {mpns}")
@@ -104,10 +102,6 @@ class FirecrawlClient:
 
         return result
     
-    # WARNING: think what if there will be multiple pages, maybe ai should
-    # check again if there is multiple pages and how to get/scroll to next page,
-    # in this case we should also return the html for ai to analize;
-    # jakby co to ja piszę takie fajne kom nie ai slop
     def _single_fetch(self,url: str, item: str, scripts: list, wait_for: int = 3000) -> dict:
         actions = []
 
@@ -255,7 +249,7 @@ class FirecrawlClient:
         return filtered_data
     
     def fetch_with_given_actions(self, url: str, actions: list, wait_for: int = 3000):
-        print(actions)
+        
         result = self.app.scrape_url(
             url=url,
             formats=['html'],

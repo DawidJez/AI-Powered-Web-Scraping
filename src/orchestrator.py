@@ -80,7 +80,7 @@ class Orchestrator:
                 last_result = result
 
                 if result["needs_more_depth"] == False and result.get("control_type") == "none":
-                    print("DEBUG: AI found nothing, aborting loop")
+                    #print("DEBUG: AI found nothing, aborting loop")
                     break
 
                 candidate = result.get("script")
@@ -88,7 +88,7 @@ class Orchestrator:
                 # category-type field (available_options) - script may be null, but it doesn't mean there is nothing
                 if candidate:    
                     if candidate in scripts:
-                        print(f"DEBUG: AI returned the same script we already have ('{candidate}') - we're stuck, aborting")
+                        #print(f"DEBUG: AI returned the same script we already have ('{candidate}') - we're stuck, aborting")
                         break
 
                     scripts.append(result["script"])
@@ -147,8 +147,6 @@ class Orchestrator:
         filter["search_terms"] = [choice for choice in user_choices]
         resolved = self.resolve_scripts(url, analisys, filter)
 
-        print(f"\n\n\n{resolved}\n\n\n")
-
         filtered_data = self.firecrawl.fetch_filtered_data(url, resolved, filter, csv_list, resolved["available_options"])
 
         return {
@@ -165,7 +163,6 @@ class Orchestrator:
 
             if age_seconds < 86400: # 24h
                 cached = json.loads(filename.read_text(encoding="utf-8"))
-                print(f"cached: {cached}")
 
                 if cached.get("confidence") != "none" and cached.get("next_button_script"):
                     return cached
@@ -178,8 +175,6 @@ class Orchestrator:
                 "confidence": "high",
                 "evidence": "hardcoded - virtualized grid, pagination not visible in static HTML/markdown"
             }
-            
-        print(f"\nresolved_pagination: {resolved_pagination}")
 
         if resolved_pagination.get("confidence") != "none" and resolved_pagination.get("next_button_script"):
             with open(filename, "w", encoding="utf-8") as f:
@@ -202,8 +197,7 @@ class Orchestrator:
 
         for item, page_data in zip(csv_list, data):
             extracted = self.extractor.extract(page_data, user_prompt)
-            print(f"DEBUG: page1 for item={item}: len(records)={len(extracted['records'])}, page_count={extracted.get('page_count')}")
-
+            
             all_results.append(extracted["records"])
 
             if "analog.com" in url and extracted.get("page_count") == None and extracted.get("records") and extracted.get("total_records_declared"):
@@ -246,7 +240,7 @@ class Orchestrator:
                 )
                 root.destroy()
             except Exception:
-                print("DEBUG: failed to open file selection dialog, please enter the path manually.")
+                print("Failed to open file selection dialog, please enter the path manually.")
                 source = None
 
             if not source:
@@ -344,7 +338,7 @@ class Orchestrator:
         if not output_path:
             output_path = "data/excel/output.xlsx"
 
-        pdf_choice = input("Download PDF datasheets as well? (y/n) [n]: ").strip().lower()
+        pdf_choice = input("Download PDF datasheets as well? (y/n) [no in default]: ").strip().lower()
         download_pdfs = pdf_choice in ("t", "tak", "y", "yes")
 
         print("\nDownloading data, this may take a moment...\n")
@@ -375,6 +369,14 @@ class Orchestrator:
 
         self.excel.save(flat_all_results, output_path)
         print(f"Saved {len(flat_all_results)} records to: {output_path}")
+
+        if download_pdfs and ("Full URL of the PDF datasheet" not in user_prompt or "MPN" not in user_prompt):
+            user_prompt += (
+                "\nRemember to extract these fields:\n"
+                " - Full URL of the PDF datasheet\n"
+                " - MPN\n"
+                "So I can download the PDFs."
+            )
 
         if download_pdfs:
             print("Downloading PDF datasheets...")

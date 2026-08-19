@@ -1,18 +1,15 @@
 import math
 from pydoc import html
-from unittest import result
 
 from google import genai
 from google.genai import types
 from google.genai import errors
+
 import os
-import re
-from difflib import SequenceMatcher
 import json
 from bs4 import BeautifulSoup
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
+from concurrent.futures import ThreadPoolExecutor, as_completed # maybe used in the future
 from markdownify import markdownify
 
 class AIExtractor:
@@ -84,7 +81,7 @@ class AIExtractor:
             try:
                 response = self.client.models.generate_content(
                     model=self.model,
-                    contents=[f"Content:\n{markdown_content[:3000]}"],  # tylko początek, licznik zwykle na górze
+                    contents=[f"Content:\n{markdown_content[:3000]}"],
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
                         response_mime_type="application/json"
@@ -420,7 +417,7 @@ class AIExtractor:
             f"--- Occurrence {w['occurrence_index']} ---\n{w['fragment']}"
             for w in html_windows
         )
-        print(len(combined_windows))
+        
         if len(combined_windows) > 150000:
             raise ValueError("DEBUG: MAYDAY we got a problem with length")
         
@@ -698,7 +695,9 @@ class AIExtractor:
         except json.JSONDecodeError:
             print(f"DEBUG: failed to parse the response: {response.text[:300]}")
             return {}
-        
+
+    # debug func when testing filtereing and scrpping the data
+    # ai returns only list of found profucts and some short analisys
     def debug_ask_ai_about_products(self, firecrawl_result: dict):
 
         prompt = f"""

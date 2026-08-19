@@ -38,12 +38,16 @@ class PDFDownloader:
         for r in records:
             pdf_url = r.get(url_field)
             name = r.get(name_field, "unknown")
+            if not pdf_url:
+                print(f"There was no pdf url found ... for {name}")
+                results.append({"name": name, "path": None})
+                continue
 
             try:
                 path = self.download(pdf_url, name, output_dir)
 
             except Exception as e:
-                print(f"DEBUG: failed to download PDF for '{name}' ({pdf_url}): {e}")
+                print(f"Failed to download PDF for '{name}' ({pdf_url}): {e}")
                 path = None
 
             results.append({"name": name, "path": path})
