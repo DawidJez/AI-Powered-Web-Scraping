@@ -54,6 +54,14 @@ release:
     tag_name: $CI_COMMIT_TAG
     name: "Release $CI_COMMIT_TAG"
     description: "Scraper $CI_COMMIT_TAG"
+    assets:
+      links:
+        - name: "scraper-linux"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/dist/scraper?job=linux"
+          link_type: "package"
+        - name: "scraper-windows.exe"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/dist/scraper.exe?job=windows"
+          link_type: "package"
 
   rules:
     - if: $CI_COMMIT_TAG
