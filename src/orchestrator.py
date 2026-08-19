@@ -389,7 +389,7 @@ class Orchestrator:
             "records": flat_all_results
         }
 
-    def run_debug(self, url: str, user_prompt: str, user_filter_choice: list, user_csv_list: list, output_path: str = "data/excel/output.xlsx", download_pdfs: bool = False):
+    def run_debug(self, url: str, user_prompt: str, user_filter_choice: list, user_csv_list: list, output_path: str, download_pdfs: bool = False):
         """
         Almost same as run(), but with debug prints and timing at every stage - use during
         development/testing to see what's happening at each step.
@@ -481,23 +481,4 @@ class Orchestrator:
 
         # if pdf wanted always include "- Full URL of the PDF datasheet" and "- MPN" (as your producy/part) 
         # so pdf downloader would work
-        user_prompt = """
-            Extract every record from the page content. For each record, return:
-
-            - MPN
-            - Subcategory
-            - Rating
-            - Package type
-            - Pin count
-            - TI functional safety category
-            - Operating temperature range (°C)
-            - Package area (mm²)
-            - Package size (L × W) (mm)
-            - Price/Quantity (USD)
-            - Product status
-            - Full URL of the PDF datasheet
-            - Full URL of the HTML datasheet
-
-            Return a JSON array containing one object per occurrence found.
-            If no matches are found at all, return an empty array [].
-        """
+        
