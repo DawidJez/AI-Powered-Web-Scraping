@@ -5,33 +5,36 @@ stages:
 
 linux:
   stage: build
+  tags:
+    - saas-linux-2xlarge-amd64
+
   image: python:3.12
 
   script:
     - pip install -r requirements.txt
     - pip install pyinstaller
-    - pyinstaller --onefile scraper.py
-    - mv dist/scraper dist/scraper-linux
+    - pyinstaller --onefile --name scraper src/main.py
 
   artifacts:
     paths:
-      - dist/scraper-linux
+      - dist/scraper
+    expire_in: 1 week
 
 
 windows:
   stage: build
   tags:
-    - windows
+    - saas-windows-medium-amd64
 
   script:
     - py -m pip install -r requirements.txt
     - py -m pip install pyinstaller
-    - pyinstaller --onefile scraper.py
-    - move dist\scraper.exe dist\scraper-windows.exe
+    - pyinstaller --onefile --name scraper src/main.py
 
   artifacts:
     paths:
-      - dist/scraper-windows.exe
+      - dist/scraper.exe
+    expire_in: 1 week
 
 
 release:
@@ -39,22 +42,18 @@ release:
   image: registry.gitlab.com/gitlab-org/release-cli:latest
 
   needs:
-    - linux
-    - windows
+    - job: linux
+      artifacts: true
+    - job: windows
+      artifacts: true
 
   script:
-    - echo "Creating release"
+    - echo "Creating release $CI_COMMIT_TAG"
 
   release:
     tag_name: $CI_COMMIT_TAG
     name: "Release $CI_COMMIT_TAG"
     description: "Scraper $CI_COMMIT_TAG"
-    assets:
-      links:
-        - name: "scraper-linux"
-          url: "${CI_PROJECT_URL}/-/jobs/${LINUX_JOB_ID}/artifacts/raw/dist/scraper-linux"
-        - name: "scraper-windows.exe"
-          url: "${CI_PROJECT_URL}/-/jobs/${WINDOWS_JOB_ID}/artifacts/raw/dist/scraper-windows.exe"
 
   rules:
     - if: $CI_COMMIT_TAG
