@@ -6,7 +6,7 @@ stages:
 linux:
   stage: build
   tags:
-    - saas-linux-2xlarge-amd64
+    - saas-linux-medium-amd64
 
   image: python:3.12
 
