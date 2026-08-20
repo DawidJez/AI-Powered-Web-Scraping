@@ -39,7 +39,7 @@ TEST_CONFIGS = {
         "user_prompt": TI_PROMPT,
         "user_filter_choice": ["Product number", "part number"],
         "user_csv_list": ["TMP75", "TMP117", "TMP9R01-SP", "TMCS1170", "ISOTMP35R", "FAN31790", "ISO"],
-        "output_path": "data/excel/output.xlsx"
+        "output_path": "data/excel/output_test_1.xlsx"
     },
     "2": {
         "label": "Analog Devices - parametric search",
@@ -47,7 +47,7 @@ TEST_CONFIGS = {
         "user_prompt": GENERIC_PROMPT,
         "user_filter_choice": ["Parts", "Filter Parts"],
         "user_csv_list": ["ADX"],
-        "output_path": "data/excel/output.xlsx"
+        "output_path": "data/excel/output_test_2.xlsx"
     },
     "3": {
         "label": "Vishay - LEDs SMD",
@@ -55,23 +55,23 @@ TEST_CONFIGS = {
         "user_prompt": GENERIC_PROMPT,
         "user_filter_choice": ["Dominant Wavelength Min.", "360", "562"],
         "user_csv_list": ["360", "562"],
-        "output_path": "data/excel/output.xlsx"
+        "output_path": "data/excel/output_test_3.xlsx"
     },
     "4": {
         "label": "Infineon - digital isolators",
         "url": "https://www.infineon.com/products/isolation/digital-isolators#products",
         "user_prompt": GENERIC_PROMPT,
-        "user_filter_choice": ["Qualification", "Select", "Industrial"],
-        "user_csv_list": ["Industrial"],
-        "output_path": "data/excel/output.xlsx"
+        "user_filter_choice": ["Part number", "Select..."],
+        "user_csv_list": ["2DIB1401F", "2DIB1400F", "2DIB1411F", "4DIR2400H"],
+        "output_path": "data/excel/output_test_4.xlsx"
     },
     "5": {
         "label": "KOA Speer",
-        "url": "https://www.koaspeer.com/products/resistors/general-purpose/",
+        "url": "https://www.koaspeer.com/products/resistors/",
         "user_prompt": GENERIC_PROMPT,
         "user_filter_choice": ["Search", "Search..."],
         "user_csv_list": ["RK73B"],
-        "output_path": "data/excel/output.xlsx"
+        "output_path": "data/excel/output_test_5.xlsx"
     },
     "6": {
         "label": "Samtec",
@@ -79,7 +79,7 @@ TEST_CONFIGS = {
         "user_prompt": GENERIC_PROMPT,
         "user_filter_choice": ["TODO"],
         "user_csv_list": ["TODO"],
-        "output_path": "data/excel/output.xlsx"
+        "output_path": "data/excel/output_test_6.xlsx"
     },
     "7": {
         "label": "Amphenol",
@@ -87,7 +87,7 @@ TEST_CONFIGS = {
         "user_prompt": GENERIC_PROMPT,
         "user_filter_choice": ["TODO"],
         "user_csv_list": ["TODO"],
-        "output_path": "data/excel/output.xlsx"
+        "output_path": "data/excel/output_test_7.xlsx"
     },
     "8": {
         "label": "TE Connectivity - power connectors",
@@ -95,7 +95,7 @@ TEST_CONFIGS = {
         "user_prompt": GENERIC_PROMPT,
         "user_filter_choice": ["TODO"],
         "user_csv_list": ["TODO"],
-        "output_path": "data/excel/output.xlsx"
+        "output_path": "data/excel/output_test_8.xlsx"
     },
     "9": {
         "label": "Molex",
@@ -103,7 +103,7 @@ TEST_CONFIGS = {
         "user_prompt": GENERIC_PROMPT,
         "user_filter_choice": ["TODO"],
         "user_csv_list": ["TODO"],
-        "output_path": "data/excel/output.xlsx"
+        "output_path": "data/excel/output_test_9.xlsx"
     },
 }
 

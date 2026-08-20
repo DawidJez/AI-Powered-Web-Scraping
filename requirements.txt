@@ -1,7 +1,7 @@
-firecrawl-py
-beautifulsoup4
-google-genai
-openpyxl
-markdownify
-requests
-python-dotenv
+firecrawl-py==4.32.0
+beautifulsoup4==4.15.0
+google-genai==2.11.0
+openpyxl==3.1.5
+markdownify==1.2.3
+requests==2.34.2
+python-dotenv==1.2.2
