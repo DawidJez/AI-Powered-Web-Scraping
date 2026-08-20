@@ -156,7 +156,7 @@ export FIRECRAWL_API_KEY="your_firecrawl_key"
 export GEMINI_API_KEY="your_gemini_key"
 ```
 
-Or create a `.env` file:
+Or create a `.env` file from the template `.env.example` and fill in your keys:
 
 ```env
 FIRECRAWL_API_KEY=your_firecrawl_key

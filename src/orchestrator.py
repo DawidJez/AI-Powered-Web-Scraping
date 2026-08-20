@@ -310,15 +310,15 @@ class Orchestrator:
         self._print_sample(page_sample["page_sample_result"])
 
         print("How do you want to provide the list of values to search for?")
-        print("  1. Type manually (values separated by commas)")
+        print("  1. Type manually (values separated by commas ',', semicolons ';')")
         print("  2. Choose a file from computer (CSV / TXT / Excel)")
         choice = input("Choose 1 or 2: ").strip()
 
         if choice == "2":
             user_csv_list = self.resolve_csv()
         else:
-            raw = input("Enter values separated by commas: ")
-            user_csv_list = [x.strip() for x in raw.split(",") if x.strip()]
+            raw = input("Enter values separated by commas/semicolons: ")
+            user_csv_list = [x.strip() for x in re.split(r"[,;]", raw) if x.strip()]
 
         if not user_csv_list:
             print("No values provided to search for - aborting.")
@@ -399,16 +399,17 @@ class Orchestrator:
 
         start_sample = time.time()
         page_sample = self.page_sample(url)
-        print(page_sample["page_sample_result"])
+        print(f"page_sample: \n{page_sample["page_sample_result"]}\n")
         end_sample = time.time()
 
         start_analisys = time.time()
         filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice[0])
         resolved_pagination = self.resolve_pagination(url, page_sample["page_sample_result"], page_sample["html_to_analize"])
-        print(filter_analisys)
+        print(f"filter_analisys: \n{filter_analisys}\n")
         end_analisys = time.time()
 
         start_filter = time.time()
+        print(f"filtering the data ...\n")
         filtered_data = self.filtered_scraping(
             url, filter_analisys,
             page_sample["page_sample_result"],
@@ -418,6 +419,7 @@ class Orchestrator:
         end_filter = time.time()
 
         start_extract = time.time()
+        print(f"extracting the data ...\n")
         extracted_data = self.extract_data(
             url,
             filtered_data,
@@ -428,6 +430,7 @@ class Orchestrator:
         end_extract = time.time()
 
         flat_all_results = [record for sublist in extracted_data for record in sublist]
+        print(f"flat_all_results (length): {len(flat_all_results)}\n")
 
         if not flat_all_results:
             raise ValueError("No records to save - check the filter/field/URL")
@@ -436,7 +439,7 @@ class Orchestrator:
 
         if download_pdfs:
             self.pdf.download_all(flat_all_results, "Full URL of the PDF datasheet", "MPN")
-
+        print(f"check {output_path} path where the new output excel is\n")
         end_test = time.time()
 
         prompt_tokens = sum(t["prompt_tokens"] for t in self.extractor.tokens_usage)

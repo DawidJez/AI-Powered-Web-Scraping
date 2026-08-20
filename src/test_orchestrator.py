@@ -24,16 +24,21 @@ GENERIC_PROMPT = """
     datasheet URL, and any other relevant technical specs shown).
 """
 
-# TODO: dopracować filter_choice / csv_list dla nowych stron (koaspeer, samtec,
-# amphenol, te.com, molex) po pierwszym udanym przejściu page_sample - na razie
-# to tylko szkielet do podmiany
+
+"""
+Page sample -> probe of the page and analisys of the 1. page takes 50-60s
+Filtering per one record from csv list takes 15-55s -> wide range of time comes from the DOM structure
+Extracting data from markdown takes 20-70s -> also very reliable to number of records and pages to extract.
+"""
+
+# BY DEFAULT pdf downloader is turned off in run_debug func
 TEST_CONFIGS = {
     "1": {
         "label": "Texas Instruments - sensors",
         "url": "https://www.ti.com/product-category/sensors/products.html#",
         "user_prompt": TI_PROMPT,
         "user_filter_choice": ["Product number", "part number"],
-        "user_csv_list": ["TMP75", "TMP117", "TMP", "TMP9R01-SP", "TMCS1170", "ISOTMP35R", "FAN31790"],
+        "user_csv_list": ["TMP75", "TMP117", "TMP9R01-SP", "TMCS1170", "ISOTMP35R", "FAN31790", "ISO"],
         "output_path": "data/excel/output.xlsx"
     },
     "2": {
@@ -48,8 +53,8 @@ TEST_CONFIGS = {
         "label": "Vishay - LEDs SMD",
         "url": "https://www.vishay.com/en/leds/smd/",
         "user_prompt": GENERIC_PROMPT,
-        "user_filter_choice": ["Dominant Wavelength Min."],
-        "user_csv_list": ["360"],
+        "user_filter_choice": ["Dominant Wavelength Min.", "360", "562"],
+        "user_csv_list": ["360", "562"],
         "output_path": "data/excel/output.xlsx"
     },
     "4": {
@@ -62,10 +67,10 @@ TEST_CONFIGS = {
     },
     "5": {
         "label": "KOA Speer",
-        "url": "https://www.koaspeer.com",
+        "url": "https://www.koaspeer.com/products/resistors/general-purpose/",
         "user_prompt": GENERIC_PROMPT,
-        "user_filter_choice": ["TODO"],
-        "user_csv_list": ["TODO"],
+        "user_filter_choice": ["Search", "Search..."],
+        "user_csv_list": ["RK73B"],
         "output_path": "data/excel/output.xlsx"
     },
     "6": {
