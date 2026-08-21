@@ -24,6 +24,12 @@ GENERIC_PROMPT = """
     datasheet URL, and any other relevant technical specs shown).
 """
 
+TEST6_PROMPT = """
+    Extract first 20 records from the page content. For each record, return whatever
+    fields are available (part number, description, package, price, status,
+    datasheet URL, and any other relevant technical specs shown).
+"""
+
 
 """
 Page sample -> probe of the page and analisys of the 1. page takes 50-60s
@@ -67,26 +73,26 @@ TEST_CONFIGS = {
     },
     "5": {
         "label": "KOA Speer",
-        "url": "https://www.koaspeer.com/products/resistors/",
+        "url": "https://www.koaspeer.com/products/leaded-resistors/power-leaded/bgrv-bsrv-bwrv/", # there is no products lists like tables, only pdfs, ai extractor and firecrawl client were not made to operate that 
         "user_prompt": GENERIC_PROMPT,
-        "user_filter_choice": ["Search", "Search..."],
-        "user_csv_list": ["RK73B"],
+        "user_filter_choice": ["Type", "Standard Decade Values Table"],
+        "user_csv_list": ["BWRV"],
         "output_path": "data/excel/output_test_5.xlsx"
     },
     "6": {
         "label": "Samtec",
-        "url": "https://www.samtec.com",
-        "user_prompt": GENERIC_PROMPT,
-        "user_filter_choice": ["TODO"],
-        "user_csv_list": ["TODO"],
+        "url": "https://www.samtec.com/picturesearch/flex-stack-solutionator", # script in current state is not able to multi-filter
+        "user_prompt": TEST6_PROMPT,
+        "user_filter_choice": ["Price", "0.37"],
+        "user_csv_list": ["0.37"],
         "output_path": "data/excel/output_test_6.xlsx"
     },
     "7": {
         "label": "Amphenol",
-        "url": "https://amphenol.com",
+        "url": "https://amphenol.com/products/antenna-solutions",
         "user_prompt": GENERIC_PROMPT,
-        "user_filter_choice": ["TODO"],
-        "user_csv_list": ["TODO"],
+        "user_filter_choice": ["Product Name", "Product Search"],
+        "user_csv_list": ["5G"],
         "output_path": "data/excel/output_test_7.xlsx"
     },
     "8": {
