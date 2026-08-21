@@ -101,6 +101,40 @@ Includes:
 
 The flow is orchestrated by `Orchestrator`. Here's what happens:
 
+```mermaid
+flowchart TD
+    U["User input\nURL + values + filter name + prompt"] --> O["Orchestrator.run()"]
+
+    O --> P["page_sample(url)\nFirecrawlClient.fetch_page()"]
+    P --> SUG["AIExtractor.suggestion()\npage_sample_result"]
+    P --> HTML["html_to_analize"]
+
+    HTML --> SF["search_for_filters(html, filter_name)\nAIExtractor.analize_html()"]
+    SF --> AN["analysis dict\nfilter metadata + scripts + confidence"]
+
+    AN --> RS["resolve_scripts(url, analysis, filter)\nresolve gate / final JS"]
+    RS --> F["filtered_scraping(...)\nFirecrawlClient.fetch_filtered_data()"]
+
+    F --> CARD{"Filter cardinality"}
+    CARD -->|identifier| SINGLE["_single_fetch()\nwrite value + Enter"]
+    CARD -->|bulk| BULK["_bulk_fetch()\nwrite multiple values"]
+    CARD -->|category| CAT["_category_fetch()\nchoose option script"]
+
+    SINGLE --> DATA["filtered_data\nmarkdown + links"]
+    BULK --> DATA
+    CAT --> DATA
+
+    DATA --> EXT["extract_data(...)\nAIExtractor.extract()"]
+    EXT --> PAGCHECK{"paging_needed?"}
+    PAGCHECK -->|yes| PAG["resolve_pagination()\nfetch_with_pagination()\ncache 24h per URL"]
+    PAG --> EXT
+    PAGCHECK -->|no| XLS["ExcelExporter.save()"]
+
+    XLS --> PDFCHECK{"Download PDFs?"}
+    PDFCHECK -->|yes| PDF["PDFDownloader.download_all()"]
+    PDFCHECK -->|no| DONE["Finished"]
+```
+
 #### 1. Page reconnaissance
 
 Fetch the page and ask AI: What fields exist? Which are filterable? Does pagination exist?
