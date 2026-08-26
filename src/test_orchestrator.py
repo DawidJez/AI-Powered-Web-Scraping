@@ -89,7 +89,7 @@ TEST_CONFIGS = {
     },
     "7": {
         "label": "Amphenol",
-        "url": "https://amphenol.com/products/antenna-solutions",
+        "url": "https://amphenol.com/products/antenna-solutions", # same problem with this site with no product tables, script in current state can't extract data like these
         "user_prompt": GENERIC_PROMPT,
         "user_filter_choice": ["Product Name", "Product Search"],
         "user_csv_list": ["5G"],
@@ -97,18 +97,18 @@ TEST_CONFIGS = {
     },
     "8": {
         "label": "TE Connectivity - power connectors",
-        "url": "https://www.te.com/en/products/connectors/power-connectors/intersection/",
+        "url": "https://www.te.com/en/plp/das-antennas/Y44rw.html", # it works fine, may have some bugs in future more complex tests
         "user_prompt": GENERIC_PROMPT,
-        "user_filter_choice": ["TODO"],
-        "user_csv_list": ["TODO"],
+        "user_filter_choice": ["Communication Protocol", "ISM"],
+        "user_csv_list": ["ISM"],
         "output_path": "data/excel/output_test_8.xlsx"
     },
     "9": {
         "label": "Molex",
-        "url": "https://www.molex.com/en-us/home",
+        "url": "https://www.molex.com/en-us/part-list/connectors", # it needs help with long checkbox lists, only a few fits in html windows
         "user_prompt": GENERIC_PROMPT,
-        "user_filter_choice": ["TODO"],
-        "user_csv_list": ["TODO"],
+        "user_filter_choice": ["Product Name", "F", "AISG"],
+        "user_csv_list": ["F", "Adapter", "AISG"],
         "output_path": "data/excel/output_test_9.xlsx"
     },
 }

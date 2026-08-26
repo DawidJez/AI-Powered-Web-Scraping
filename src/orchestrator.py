@@ -345,7 +345,7 @@ class Orchestrator:
 
         filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice[0])
         resolved_pagination = self.resolve_pagination(url, page_sample["page_sample_result"], page_sample["html_to_analize"])
-
+        
         filtered_data = self.filtered_scraping(
             url, filter_analisys,
             page_sample["page_sample_result"],
@@ -405,6 +405,7 @@ class Orchestrator:
         start_analisys = time.time()
         filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice[0])
         resolved_pagination = self.resolve_pagination(url, page_sample["page_sample_result"], page_sample["html_to_analize"])
+        print(f"\n\nresolved_pagination: {resolved_pagination} \n")
         print(f"filter_analisys: \n{filter_analisys}\n")
         end_analisys = time.time()
 

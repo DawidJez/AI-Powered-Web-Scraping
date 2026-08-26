@@ -345,18 +345,24 @@ When a page fails, the most effective debugging flow is:
 
 The model may occasionally pick a stale or incorrect selector. This is a top quality issue.
 
-### 3. Pagination is unreliable on some sites
+### 3. Pages without product tables are not a good fit
+
+✗ The scraper struggles on sites where products are shown as links, images, cards, or other non-tabular layouts instead of a clear product table/grid
+✗ If records are not exposed as structured rows, the script cannot reliably detect and filter them
+✓ This works best when the page shows product entries in a repeatable table or grid-like structure
+
+### 4. Pagination is unreliable on some sites
 
 ✗ Virtualized grids, hidden counters, custom navigation still need debugging  
 ✗ No universal pagination pattern exists
 
-### 4. Specialized filters missing
+### 5. Specialized filters missing
 
 ✗ Range sliders  
 ✗ Date pickers  
 ✗ Complex multi-select patterns
 
-### 5. Code is intentionally experimental
+### 6. Code is intentionally experimental
 
 - Prototype scripts still present
 - Debug output scattered around
@@ -412,10 +418,23 @@ pip list --outdated
    - Robust filter-not-found handling
    - Easier handling of ambiguous field names
 
-5. **Add test coverage**
+5. **Make failing test sites work**
+   - Fix test 5, 6, 7, and 9
+   - Determine which patterns still require manual site-specific handling
+   - Separate true product catalogs from search-only or image-link landing pages
+
+6. **Fix truncated `available_options` from Prompt A/B**
+   - Root cause: `available_options` can be cut off when AI only sees a fragment of the HTML inside the visible window, especially for large filter panels (for example Samtec "Product Name" facet with hundreds of options)
+   - In those cases the AI returns only the first few values instead of the full option list, which later breaks `_category_fetch` because `difflib` cannot match the requested value
+   - Planned solution: add `_expand_full_option_list(full_html, available_options)` that takes the AI-generated script pattern, reconstructs the option template, and extracts all matching values from the full untruncated HTML via BeautifulSoup using the relevant `id`/`name` prefix/suffix pattern
+   - fail-safe behavior: if no match is found in the DOM or the pattern is unknown, fall back to the original partial AI list without changing current behavior
+   - current status: not wired into the pipeline yet; it should be called immediately after Prompt A/B returns and before `_category_fetch` is used
+   - limitation: this is intended only for `click_checkbox` / `click_option` flows that use `id` or `name`, not for `select_dropdown` patterns such as Vishay-style `<option value="...">` lists
+
+7. **Add test coverage**
    - Unit tests for helpers
    - Fixture-based tests with sample HTML
    - Regression tests for known patterns
 
-6. **Reduce hardcoded behavior**
+8. **Reduce hardcoded behavior**
    - Move repeated fixes into reusable abstractions
