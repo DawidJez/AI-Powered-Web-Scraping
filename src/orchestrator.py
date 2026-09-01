@@ -30,9 +30,9 @@ class Orchestrator:
 
         return result
     
-    def search_for_filters(self, html: str, search_term: str):
+    def search_for_filters(self, html: str, search_terms:list):
         """ Analyses html content and returns a list of filters found on the page. """
-        result = self.extractor.analize_html(html, search_term)
+        result = self.extractor.analize_html(html, search_terms)
 
         return result
 
@@ -343,7 +343,8 @@ class Orchestrator:
 
         print("\nDownloading data, this may take a moment...\n")
 
-        filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice[0])
+        ### CHYBA TU REALNY BUG ZE W ANALIZE HTML GDY ZNAJDZIE FILTR TO NIE SZUKAMY DALEJ WIEC INNE POMOCNICZE SEARCH TERMS NIC NIE DADZA DO CATEGORY FETCHA
+        filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice)
         resolved_pagination = self.resolve_pagination(url, page_sample["page_sample_result"], page_sample["html_to_analize"])
         
         filtered_data = self.filtered_scraping(

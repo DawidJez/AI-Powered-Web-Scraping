@@ -107,8 +107,8 @@ TEST_CONFIGS = {
         "label": "Molex",
         "url": "https://www.molex.com/en-us/part-list/connectors", # it needs help with long checkbox lists, only a few fits in html windows
         "user_prompt": GENERIC_PROMPT,
-        "user_filter_choice": ["Product Name", "F", "AISG"],
-        "user_csv_list": ["F", "Adapter", "AISG"],
+        "user_filter_choice": ["Product Name", "Micro-Latch"],
+        "user_csv_list": ["Micro-Latch"],
         "output_path": "data/excel/output_test_9.xlsx"
     },
 }

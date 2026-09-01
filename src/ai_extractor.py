@@ -20,30 +20,32 @@ class AIExtractor:
         # DEBUG INFO: use model="gemini-3.1-flash-lite"/"gemini-2.5-flash"/"gemini-2.5-flash-lite" 
         # after "gemini-flash-latest" is burnt out of tokens
 
-    def _extract_html_windows(self, html: str, search_term: str, window_size: int = 3000, word_count: int = 3) -> list[dict]:
+    def _extract_html_windows(self, html: str, search_terms: list, window_size: int = 3000, word_count: int = 3) -> list[dict]:
         soup = BeautifulSoup(html, "html.parser")
-
+        
         for trash_tag in soup(["script", "style"]):
             trash_tag.decompose()
-
-        clean_html = soup.prettify()
-
-        short_term = " ".join(search_term.split()[:word_count])
-
+        clean_html = str(soup) 
+        
         windows = []
-        start_idx = 0
+        for search_term in search_terms:
+            short_term = " ".join(search_term.split()[:word_count])
+            if not short_term:
+                continue
 
-        while len(clean_html) > start_idx:
-            idx = clean_html.find(short_term, start_idx)
-            if idx == -1:
-                break
+            start_idx = 0
+            while len(clean_html) > start_idx:
+                idx = clean_html.find(short_term, start_idx)
+                
+                if idx == -1:
+                    break
 
-            start = max(0, idx - window_size)
-            end = min(len(clean_html), idx + len(short_term) + window_size)
+                start = max(0, idx - window_size)
+                end = min(len(clean_html), idx + len(short_term) + window_size)
 
-            windows.append({"occurrence_index": len(windows), "fragment": clean_html[start:end]})
+                windows.append({"occurrence_index": len(windows), "fragment": clean_html[start:end]})
 
-            start_idx = idx + len(short_term)
+                start_idx = idx + len(short_term)
 
         return windows
 
@@ -396,10 +398,9 @@ class AIExtractor:
             return {}
         
 
-
-
-    def analize_html(self, html: str, search_term: str, max_retries: int = 3):
-        html_windows = self._extract_html_windows(html, search_term)
+    def analize_html(self, html: str, search_terms: list, max_retries: int = 3):
+        search_terms = [s for s in search_terms if s and s.strip()]
+        html_windows = self._extract_html_windows(html, search_terms)
 
         if not html_windows:
             return {
@@ -419,7 +420,7 @@ class AIExtractor:
         )
         
         if len(combined_windows) > 150000:
-            raise ValueError("DEBUG: MAYDAY we got a problem with length")
+            raise ValueError(f"DEBUG: MAYDAY we got a problem with length {len(combined_windows)}")
         
         system_instruction = ("""
             # Role
@@ -665,7 +666,7 @@ class AIExtractor:
             try:
                 response = self.client.models.generate_content(
                     model=self.model,
-                    contents=[f"Target label: {search_term}\n\nHTML fragment:\n{combined_windows}"],
+                    contents=[f"Target label: {search_terms}\n\nHTML fragment:\n{combined_windows}"],
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
                         response_mime_type="application/json"
@@ -744,12 +745,7 @@ class AIExtractor:
         """we take the filter["name"] so llm will know what its actually looking for"""
 
         search_terms = filter.get("search_terms") or [filter["name"]]
-        html_windows = []
-
-        for term in search_terms:
-            windows = self._extract_html_windows(html, term)
-            if windows:
-                html_windows.extend(windows)
+        html_windows = self._extract_html_windows(html, search_terms)
 
         if not html_windows:
             return {"script": None, "confidence": "none", "evidence": "text not found in HTML"}
@@ -1051,18 +1047,14 @@ class AIExtractor:
             return None
 
     def resolve_pagination(self, page_probe: dict, html: str , url: str, max_retries: int = 3) -> dict:
-        html_windows = []
+  
         pagination_search_terms = ["Next", "Next Page", "next page", 'aria-label="Next page"', "chevron-right", "pagination-next", 
                                    "pagination_nav", "pagination__nav", "Page</span>", "Results per page", 'class="pagination"',
                                    page_probe["pagination_evidence"]
                                    ]
         
         pagination_search_terms = [term for term in pagination_search_terms if term]
-
-        for term in pagination_search_terms:
-            windows = self._extract_html_windows(html, term)
-            if windows:
-                html_windows.extend(windows)
+        html_windows = self._extract_html_windows(html, pagination_search_terms)
 
         if not html_windows:
             return {"script": None, "confidence": "none", "evidence": "text not found in HTML"}
