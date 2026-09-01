@@ -192,6 +192,7 @@ class Orchestrator:
             user_prompt: str, 
             csv_list: list, 
             resolved_pagination: dict,
+            available_fields: list[str],
             apply_script: str = None
         ):
         all_results = []
@@ -200,7 +201,7 @@ class Orchestrator:
         scripts = filtered_data["resolved_scripts"]
 
         for item, page_data in zip(csv_list, data):
-            extracted = self.extractor.extract(page_data, user_prompt)
+            extracted = self.extractor.extract(page_data, user_prompt, available_fields)
             
             all_results.append(extracted["records"])
 
@@ -208,14 +209,12 @@ class Orchestrator:
                 extracted["page_count"] = math.ceil(extracted["total_records_declared"]/len(extracted["records"]))
                 extracted["paging_needed"] = bool(extracted["page_count"] > 1)
 
-            #print(f"extracted.get('paging_needed'): {extracted.get('paging_needed')}")
             if extracted.get("paging_needed"):
                 page_count = extracted["page_count"]
                 new_html_pages = self.firecrawl.fetch_with_pagination(url, scripts, resolved_pagination, page_count, item, apply_script=apply_script)
 
                 for page_html in new_html_pages:
-                    extracted_more = self.extractor.extract(page_html, user_prompt)
-                    #print(f"DEBUG: next page for item={item}: len(records)={len(extracted_more['records'])}")
+                    extracted_more = self.extractor.extract(page_html, user_prompt, available_fields)
                     all_results.append(extracted_more["records"])
 
         return all_results

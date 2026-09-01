@@ -99,7 +99,7 @@ class AIExtractor:
                 time.sleep(2)
         return None
 
-    def _single_extract(self, content: dict, user_prompt: str, max_retries: int = 3):
+    def _single_extract(self, content: dict, user_prompt: str, fields_instruction: str, max_retries: int = 3):
 
         markdown_content = content.get("markdown")
         if not markdown_content:
@@ -170,7 +170,7 @@ class AIExtractor:
             try:
                 response = self.client.models.generate_content(
                     model=self.model,
-                    contents=[f"Searching for: {user_prompt}\n\nContent:\n{markdown_content}"],
+                    contents=[f"Searching for: {user_prompt}\n\nContent:\n{markdown_content} \nand fields_instruction:\n {fields_instruction}"],
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
                         response_mime_type="application/json"
@@ -223,9 +223,16 @@ class AIExtractor:
 
         return parsed
         
-    def extract(self, filtered_data: dict, user_prompt: str) -> dict:
+    def extract(self, filtered_data: dict, user_prompt: str, available_fields: list[str]) -> dict:
+        fields_instruction = (
+            "You MUST use exactly these field names as JSON keys for every record, "
+            "verbatim, no renaming, no snake_case conversion, no synonyms:\n"
+            + "\n".join(f"- {f}" for f in available_fields)
+            + "\nIf a field's value isn't present for a given record, use null - "
+            "never omit the key and never invent a new key not in this list."
+        )
 
-        result = self._single_extract(filtered_data, user_prompt)
+        result = self._single_extract(filtered_data, user_prompt, fields_instruction)
         records = self._deduplicate(result.get("records", []))
         page_count = result.get("filtered_page_count")
 
