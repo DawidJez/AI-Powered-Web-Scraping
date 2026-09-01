@@ -105,7 +105,7 @@ TEST_CONFIGS = {
     },
     "9": {
         "label": "Molex",
-        "url": "https://www.molex.com/en-us/part-list/connectors", # it needs help with long checkbox lists, only a few fits in html windows
+        "url": "https://www.molex.com/en-us/part-list/connectors", # wokrs fine
         "user_prompt": GENERIC_PROMPT,
         "user_filter_choice": ["Product Name", "Micro-Latch"],
         "user_csv_list": ["Micro-Latch"],

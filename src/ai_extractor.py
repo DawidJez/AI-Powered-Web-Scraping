@@ -20,7 +20,7 @@ class AIExtractor:
         # DEBUG INFO: use model="gemini-3.1-flash-lite"/"gemini-2.5-flash"/"gemini-2.5-flash-lite" 
         # after "gemini-flash-latest" is burnt out of tokens
 
-    def _extract_html_windows(self, html: str, search_terms: list, window_size: int = 3000, word_count: int = 3) -> list[dict]:
+    def _extract_html_windows(self, html: str, search_terms: list, window_size: int = 3000, word_count: int = 3, max_windows_per_term = 20) -> list[dict]:
         soup = BeautifulSoup(html, "html.parser")
         
         for trash_tag in soup(["script", "style"]):
@@ -34,9 +34,9 @@ class AIExtractor:
                 continue
 
             start_idx = 0
-            while len(clean_html) > start_idx:
+            term_window_count = 0
+            while len(clean_html) > start_idx and term_window_count < max_windows_per_term:
                 idx = clean_html.find(short_term, start_idx)
-                
                 if idx == -1:
                     break
 
@@ -44,8 +44,9 @@ class AIExtractor:
                 end = min(len(clean_html), idx + len(short_term) + window_size)
 
                 windows.append({"occurrence_index": len(windows), "fragment": clean_html[start:end]})
+                term_window_count += 1
 
-                start_idx = idx + len(short_term)
+                start_idx = end
 
         return windows
 
@@ -399,7 +400,10 @@ class AIExtractor:
         
 
     def analize_html(self, html: str, search_terms: list, max_retries: int = 3):
+        #print(search_terms)
         search_terms = [s for s in search_terms if s and s.strip()]
+        #print(f"html: {len(html)} i search_terms ({len(search_terms)}): {search_terms}")
+        
         html_windows = self._extract_html_windows(html, search_terms)
 
         if not html_windows:
@@ -566,6 +570,22 @@ class AIExtractor:
             might have more options below a scroll boundary not captured here), still
             report what you see, and note this limitation in "evidence".
 
+            # APPLY BUTTON
+            After selecting a checkbox/option/radio value in a filter panel, some sites require
+            an explicit separate action to actually apply the filter and reload the data - e.g.
+            a button labeled "Apply", "Apply Filters", "Search", "Update Results", or similar,
+            usually located near the bottom of the filter panel/facet group. Simply checking the
+            box does NOT filter the data on these sites until this button is also clicked.
+
+            If you see such a button in the fragments, report its script in "apply_script"
+            using the same scripting rules as above (a standalone JS snippet ending in
+            .click()). If no such button is visible, or the filter applies immediately on
+            selection (no separate confirm step), set "apply_script" to null.
+
+            Note: this button is typically shared across the whole filter panel (applies all
+            currently-checked options at once), not one-per-option - so it should normally
+            appear only once even in MULTIPLE OPTIONS MODE, not repeated per option.
+
             # SELECT ELEMENT SUBTYPE
             When "interaction_type" is "select_dropdown", check the <select>'s own attributes
             (applies whether it ends up as a single target_script or as per-option scripts
@@ -655,6 +675,7 @@ class AIExtractor:
             "gate_needed": boolean,
             "target_script": string or null,
             "available_options": [{"value": string, "script": string}, ...],
+            "apply_script": string or null,
             "interaction_type": "type" | "click_checkbox" | "click_option" | "select_dropdown" | "unknown",
             "confidence": "high" | "low" | "none",
             "evidence": string
@@ -741,7 +762,7 @@ class AIExtractor:
 
         return response.text
     
-    def find_script(self, scripts: list, filter: dict, html: str, max_retries: int = 3) -> dict:
+    def find_script(self, scripts: list, filter: dict, html: str, apply_script: str = None, max_retries: int = 3) -> dict:
         """we take the filter["name"] so llm will know what its actually looking for"""
 
         search_terms = filter.get("search_terms") or [filter["name"]]
@@ -754,6 +775,25 @@ class AIExtractor:
             f"--- Occurrence {w['occurrence_index']} ---\n{w['fragment']}"
             for w in html_windows
         )
+
+        apply_button_section = ""
+        if not apply_script:
+            apply_button_section = """
+            # APPLY BUTTON
+            After selecting a checkbox/option/radio value in a filter panel, some sites require
+            an explicit separate action to actually apply the filter and reload the data - e.g.
+            a button labeled "Apply", "Apply Filters", "Search", "Update Results", or similar,
+            usually located near the bottom of the filter panel/facet group. Simply checking the
+            box does NOT filter the data on these sites until this button is also clicked.
+
+            If you see such a button in the fragments, report its script in "apply_script"
+            using the same scripting rules as above. If no such button is visible, or the
+            filter applies immediately on selection, set "apply_script" to null.
+
+            Note: this button is typically shared across the whole filter panel, not
+            one-per-option - it should appear only once even in MULTIPLE OPTIONS MODE.
+            """
+
         """ 
         # FOR DEBUG
         import time
@@ -897,6 +937,8 @@ class AIExtractor:
             For "type" interactions, ignore this section - return a single "script", empty
             "available_options".
 
+            {apply_button_section}
+
             # SELECT ELEMENT SUBTYPE
             When "interaction_type" is "select_dropdown", check the <select>'s own attributes:
 
@@ -988,10 +1030,12 @@ class AIExtractor:
             "control_type": "final_control" | "intermediate_step" | "none",
             "needs_more_depth": boolean,
             "interaction_type": "type" | "click_checkbox" | "click_option" | "click_expand" | "select_dropdown" | "unknown",
+            "apply_script": string or null,
             "confidence": "high" | "low" | "none",
             "evidence": string
             }
-        """)
+        """) + apply_button_section
+        
         history_block = ""
         if scripts:
             history_block = "Already-clicked scripts so far (in order): " + " -> ".join(scripts)
@@ -1041,7 +1085,14 @@ class AIExtractor:
                 raise
 
         try:
-            return json.loads(response.text)
+            result = json.loads(response.text)
+            # Preserve an existing apply_script returned by the model.
+            # Only inject the previously-known apply_script when the model
+            # did not provide one.
+            if (not result.get("apply_script")) and apply_script:
+                result["apply_script"] = apply_script
+            return result
+        
         except json.JSONDecodeError:
             print(f"DEBUG: failed to parse the response: {response.text[:300]}")
             return None

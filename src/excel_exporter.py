@@ -44,15 +44,21 @@ class ExcelExporter:
 
     def _flatten_record(self, record: dict) -> dict:
         # Converts nested dictionaries (e.g., {'text':..., 'href':...}) into a readable string.
+        # Also flattens lists (e.g., multiple PDF links in one field) into a single string.
         flat = {}
         for key, value in record.items():
-            if isinstance(value, dict):
-                text = value.get("text", "")
-                href = value.get("href", "")
-                flat[key] = f"{text} ({href})" if href else text
-            else:
-                flat[key] = value
+            flat[key] = self._flatten_value(value)
         return flat
+
+    def _flatten_value(self, value):
+        if isinstance(value, dict):
+            text = value.get("text", "")
+            href = value.get("href", "")
+            return f"{text} ({href})" if href else text
+        elif isinstance(value, list):
+            return "; ".join(str(self._flatten_value(v)) for v in value if v is not None)
+        else:
+            return value
 
     def _get_unique_path(self, output_path: str) -> str:
         if not os.path.exists(output_path):

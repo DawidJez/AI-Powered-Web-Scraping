@@ -35,10 +35,8 @@ class FirecrawlClient:
             "links": result.links,
             "metadata": result.metadata.model_dump() if result.metadata else None,
         }                            # dict type data
-    
-    # in further improvements the pages_count and id_termn will be returned 
-    # from the first page (by llm orchestrator) and used to fetch all pages automatically, 
-    # instead of hardcoding them in the function call
+
+    # NOT USED
     def fetch_all_pages(self, url: str, pages_count: int = 8, id_term: str = "[aria-label*='Next' i]", wait_for: int = 3000) -> list[dict[str, str]]:
         all_pages = []
 
@@ -102,7 +100,7 @@ class FirecrawlClient:
 
         return result
     
-    def _single_fetch(self,url: str, item: str, scripts: list, wait_for: int = 3000) -> dict:
+    def _single_fetch(self,url: str, item: str, scripts: list, apply_script: str = None, wait_for: int = 3000) -> dict:
         actions = []
 
         gate_scripts = scripts["gate_scripts"]
@@ -121,6 +119,12 @@ class FirecrawlClient:
         actions.append({"type": "press", "key": "Enter"})
         actions.append({"type": "wait", "milliseconds": 1500})
 
+        if apply_script:
+            actions.append({"type": "executeJavascript", "script": apply_script})
+            actions.append({"type": "wait", "milliseconds": 1500})
+        else:
+            actions.append({"type": "wait", "milliseconds": 700})
+
         result = self.app.scrape_url(
             url=url,
             formats=['markdown', 'links'],
@@ -129,8 +133,8 @@ class FirecrawlClient:
             proxy="auto"
         )
 
-        with open("data/debug_markdown_dump.md", "w", encoding="utf-8") as f:
-            f.write(result.markdown)
+        #with open("data/debug_markdown_dump.md", "w", encoding="utf-8") as f:
+        #    f.write(result.markdown)
 
         return {
             "markdown": result.markdown,
@@ -138,7 +142,7 @@ class FirecrawlClient:
             "metadata": result.metadata
         }
     
-    def _bulk_fetch(self,url: str, item_list: list, scripts: dict, wait_for: int = 3000) -> dict:
+    def _bulk_fetch(self,url: str, item_list: list, scripts: dict, apply_script: str = None, wait_for: int = 3000) -> dict:
         separator: str = ", "
         text_list = separator.join(item_list)
 
@@ -157,6 +161,12 @@ class FirecrawlClient:
 
         actions.append({"type": "write", "text": text_list})
         actions.append({"type": "wait", "milliseconds": 1500})
+
+        if apply_script:
+            actions.append({"type": "executeJavascript", "script": apply_script})
+            actions.append({"type": "wait", "milliseconds": 1500})
+        else:
+            actions.append({"type": "wait", "milliseconds": 700})
 
         result = self.app.scrape_url(
             url=url,
@@ -182,7 +192,7 @@ class FirecrawlClient:
         matched_value = match[0]
         return next(o["script"] for o in available_options if o["value"] == matched_value)
     
-    def _category_fetch(self, url: str, scripts: list, choosen_script: str, wait_for: int = 3000) -> dict:
+    def _category_fetch(self, url: str, scripts: list, choosen_script: str, apply_script: str = None, wait_for: int = 3000) -> dict:
         if not choosen_script:
             raise ValueError(f"DEBUG: no chosen_options, nothing to choose from for '{choosen_script}'")
 
@@ -195,6 +205,12 @@ class FirecrawlClient:
     
         actions.append({"type": "executeJavascript", "script": choosen_script})
         actions.append({"type": "wait", "milliseconds": 1500})
+
+        if apply_script:
+            actions.append({"type": "executeJavascript", "script": apply_script})
+            actions.append({"type": "wait", "milliseconds": 1500})
+        else:
+            actions.append({"type": "wait", "milliseconds": 700})
 
         result = self.app.scrape_url(
             url=url,
@@ -220,7 +236,7 @@ class FirecrawlClient:
             select.dispatchEvent(new Event('change', {{ bubbles: true }}));
         """
 
-    def fetch_filtered_data(self, url: str, resolved: list, filter: dict, items_list: list, available_options: list) -> list[dict]:
+    def fetch_filtered_data(self, url: str, resolved: list, filter: dict, items_list: list, available_options: list, apply_script: str = None) -> list[dict]:
         filtered_data = []
 
         if resolved.get("available_options") and not resolved.get("final_script"): # it should be category so we had to make sure there will be fallback
@@ -230,18 +246,18 @@ class FirecrawlClient:
 
         if filter["cardinality"]== "identifier":
             for item in items_list:
-                result = self._single_fetch(url, item, resolved)
+                result = self._single_fetch(url, item, resolved, apply_script)
                 filtered_data.append(result)
 
         elif filter.get("bulk_search_supported"):
-            result = self._bulk_fetch(url, items_list, resolved)
+            result = self._bulk_fetch(url, items_list, resolved, apply_script)
             filtered_data.append(result)
 
         elif filter["cardinality"]== "category":
             for value in items_list:
                 choosen_script = self._resolve_choosen_option(available_options, value)
 
-                result = self._category_fetch(url, resolved, choosen_script)
+                result = self._category_fetch(url, resolved, choosen_script, apply_script)
                 filtered_data.append(result)
         else:
             raise NotImplementedError("unrecognized filter cardinality")
@@ -266,7 +282,8 @@ class FirecrawlClient:
             scripts: list, 
             resolved_pagination: dict, 
             page_count: int, 
-            item: str, 
+            item: str,
+            apply_script: str = None,
             wait_for: int = 3000
         ):
 
@@ -306,6 +323,12 @@ class FirecrawlClient:
             actions.append({"type": "executeJavascript", "script": pagination_script})
             actions.append({"type": "wait", "milliseconds": 1500})
             actions.append({"type": "scrape"})
+
+        if apply_script:
+            actions.append({"type": "executeJavascript", "script": apply_script})
+            actions.append({"type": "wait", "milliseconds": 1500})
+        else:
+            actions.append({"type": "wait", "milliseconds": 700})
 
         result = self.app.scrape_url(
             url=url,

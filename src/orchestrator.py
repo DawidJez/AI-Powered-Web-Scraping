@@ -64,7 +64,7 @@ class Orchestrator:
 
                 data_to_search = self.firecrawl.fetch_with_given_actions(url, actions) # we have to go deeper
 
-                result = self.extractor.find_script(scripts, filter, data_to_search["html"])
+                result = self.extractor.find_script(scripts, filter, data_to_search["html"], apply_script=analisys.get("apply_script"))
 
                 # ti has this problem with disabled inputs with "Filter Input"
                 if "www.ti.com" in url:
@@ -102,7 +102,8 @@ class Orchestrator:
                 "gate_scripts": gate_scripts,                                                         
                 "final_script": final_script,
                 "available_options": last_result.get("available_options") if last_result else [],
-                "interaction_type": last_result.get("interaction_type") if last_result else "unknown"
+                "interaction_type": last_result.get("interaction_type") if last_result else "unknown",
+                "apply_script": result.get("apply_script")
             }                                                                                  
         
         gate_scripts = [analisys["gate_script"]] if analisys.get("gate_script") else []
@@ -110,7 +111,8 @@ class Orchestrator:
             "gate_scripts": gate_scripts,
             "final_script": analisys.get("target_script"),
             "available_options": analisys.get("available_options"),
-            "interaction_type": analisys.get("interaction_type")
+            "interaction_type": analisys.get("interaction_type"),
+            "apply_script": analisys.get("apply_script")
         }
 
     def filtered_scraping(self, url: str, analisys: dict, page_sample_result: dict, csv_list: list[str], user_choices: list) -> dict:
@@ -146,8 +148,9 @@ class Orchestrator:
 
         filter["search_terms"] = [choice for choice in user_choices]
         resolved = self.resolve_scripts(url, analisys, filter)
+        apply_script = resolved.get("apply_script")
 
-        filtered_data = self.firecrawl.fetch_filtered_data(url, resolved, filter, csv_list, resolved["available_options"])
+        filtered_data = self.firecrawl.fetch_filtered_data(url, resolved, filter, csv_list, resolved["available_options"], apply_script=apply_script)
 
         return {
             "filtered_data": filtered_data,
@@ -188,7 +191,8 @@ class Orchestrator:
             filtered_data: dict, 
             user_prompt: str, 
             csv_list: list, 
-            resolved_pagination: dict
+            resolved_pagination: dict,
+            apply_script: str = None
         ):
         all_results = []
 
@@ -207,7 +211,7 @@ class Orchestrator:
             #print(f"extracted.get('paging_needed'): {extracted.get('paging_needed')}")
             if extracted.get("paging_needed"):
                 page_count = extracted["page_count"]
-                new_html_pages = self.firecrawl.fetch_with_pagination(url, scripts, resolved_pagination, page_count, item)
+                new_html_pages = self.firecrawl.fetch_with_pagination(url, scripts, resolved_pagination, page_count, item, apply_script=apply_script)
 
                 for page_html in new_html_pages:
                     extracted_more = self.extractor.extract(page_html, user_prompt)
@@ -343,9 +347,9 @@ class Orchestrator:
 
         print("\nDownloading data, this may take a moment...\n")
 
-        ### CHYBA TU REALNY BUG ZE W ANALIZE HTML GDY ZNAJDZIE FILTR TO NIE SZUKAMY DALEJ WIEC INNE POMOCNICZE SEARCH TERMS NIC NIE DADZA DO CATEGORY FETCHA
         filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice)
         resolved_pagination = self.resolve_pagination(url, page_sample["page_sample_result"], page_sample["html_to_analize"])
+        apply_script = filter_analisys.get("apply_script")
         
         filtered_data = self.filtered_scraping(
             url, filter_analisys,
@@ -359,7 +363,8 @@ class Orchestrator:
             filtered_data,
             user_prompt,
             user_csv_list,
-            resolved_pagination
+            resolved_pagination,
+            apply_script=apply_script
         )
 
         flat_all_results = [record for sublist in extracted_data for record in sublist]
@@ -404,10 +409,13 @@ class Orchestrator:
         end_sample = time.time()
 
         start_analisys = time.time()
-        filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice[0])
+        filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice)
         resolved_pagination = self.resolve_pagination(url, page_sample["page_sample_result"], page_sample["html_to_analize"])
+
         print(f"\n\nresolved_pagination: {resolved_pagination} \n")
         print(f"filter_analisys: \n{filter_analisys}\n")
+        apply_script = filter_analisys.get("apply_script")
+        
         end_analisys = time.time()
 
         start_filter = time.time()
@@ -427,7 +435,8 @@ class Orchestrator:
             filtered_data,
             user_prompt,
             user_csv_list,
-            resolved_pagination
+            resolved_pagination,
+            apply_script=apply_script
         )
         end_extract = time.time()
 
