@@ -398,38 +398,32 @@ pip list --outdated
 
 ### High priority
 
-1. **Generalize filter logic**
+1. **Generalize multi-filter support**
+   - Currently the pipeline is built around a single filter field per run
+   - Needs a flexible architecture that accepts an arbitrary number of filters at once (any combination of fields/values), not just one
+
+2. **Support link-based pages, not only tabular grids**
+   - Some catalog pages aren't table/grid based - product data or datasheet links live in a different structure (card lists, detail-page links)
+   - Extraction logic currently assumes a tabular/grid layout; needs a second mode for link-based pages
+
+3. **Token-based rate limiting**
+   - Track token usage with timestamps (not just a request counter)
+   - If cumulative tokens used in the current rolling window (e.g. last 60s) approach a threshold (e.g. 200k), sleep before the next call instead of relying on retry-after-error alone
+
+4. **Generalize filter logic**
    - Support more filter types
    - Reduce site-specific patches
    - Improve selector reliability
 
-2. **Improve pagination**
+5. **Improve pagination**
    - Detect page counts reliably
    - Support virtualized grids
    - Handle more next-page patterns
 
-3. **Harden the AI contract**
+6. **Harden the AI contract**
    - Stricter JSON validation
    - Better error handling
    - Clearer retry logic
-
-4. **Better UX**
-   - Clearer error messages
-   - Robust filter-not-found handling
-   - Easier handling of ambiguous field names
-
-5. **Make failing test sites work**
-   - Fix test 5, 6, 7, and 9
-   - Determine which patterns still require manual site-specific handling
-   - Separate true product catalogs from search-only or image-link landing pages
-
-6. **Fix truncated `available_options` from Prompt A/B**
-   - Root cause: `available_options` can be cut off when AI only sees a fragment of the HTML inside the visible window, especially for large filter panels (for example Samtec "Product Name" facet with hundreds of options)
-   - In those cases the AI returns only the first few values instead of the full option list, which later breaks `_category_fetch` because `difflib` cannot match the requested value
-   - Planned solution: add `_expand_full_option_list(full_html, available_options)` that takes the AI-generated script pattern, reconstructs the option template, and extracts all matching values from the full untruncated HTML via BeautifulSoup using the relevant `id`/`name` prefix/suffix pattern
-   - fail-safe behavior: if no match is found in the DOM or the pattern is unknown, fall back to the original partial AI list without changing current behavior
-   - current status: not wired into the pipeline yet; it should be called immediately after Prompt A/B returns and before `_category_fetch` is used
-   - limitation: this is intended only for `click_checkbox` / `click_option` flows that use `id` or `name`, not for `select_dropdown` patterns such as Vishay-style `<option value="...">` lists
 
 7. **Add test coverage**
    - Unit tests for helpers
@@ -438,3 +432,23 @@ pip list --outdated
 
 8. **Reduce hardcoded behavior**
    - Move repeated fixes into reusable abstractions
+
+### Mid priority
+
+1. **Parallelize PDF downloads**
+   - `PDFDownloader` currently downloads sequentially; move to a thread pool (similar to the pattern already used for page processing) for faster datasheet collection
+
+2. **LLM-assisted field matching for user input**
+   - When a user-provided filter field name doesn't cleanly match anything in `available_fields`, have the AI propose the closest match and confirm with the user in a loop, instead of failing outright
+
+### Low priority
+
+1. **AI-assisted recovery for data/value exceptions**
+   - Not code changes - this is about runtime operations on user-supplied or extracted values (e.g. a malformed/unexpected value trips an exception during processing)
+   - On such an exception, have the AI inspect the failing value(s) and propose a corrected/normalized value or response, which the pipeline then uses to continue that step
+   - Caution: feeding an AI-generated value back into the pipeline unreviewed is risky (silent, hard-to-trace changes to the data) - worth logging what was substituted so it's traceable after the fact
+
+2. **Gemini API key rotation across multiple accounts**
+   - Track daily request count per key
+   - When a key approaches its daily limit (e.g. ~500 requests), automatically switch to the next key from `.env` (`GEMINI_API_KEY_1`, `GEMINI_API_KEY_2`, ...)
+   - Rationale: keep the Gemini side effectively free/high-limit across accounts; Firecrawl usage is comparatively cheap so it doesn't need the same treatment

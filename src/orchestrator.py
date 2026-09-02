@@ -192,9 +192,12 @@ class Orchestrator:
             user_prompt: str, 
             csv_list: list, 
             resolved_pagination: dict,
-            available_fields: list[str],
+            available_fields: list[str] | None = None,
             apply_script: str = None
         ):
+        if available_fields is None:
+            available_fields = []
+
         all_results = []
 
         data = filtered_data["filtered_data"]
@@ -348,7 +351,9 @@ class Orchestrator:
 
         filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice)
         resolved_pagination = self.resolve_pagination(url, page_sample["page_sample_result"], page_sample["html_to_analize"])
+
         apply_script = filter_analisys.get("apply_script")
+        available_fields = page_sample["page_sample_result"].get("available_fields", [])
         
         filtered_data = self.filtered_scraping(
             url, filter_analisys,
@@ -363,6 +368,7 @@ class Orchestrator:
             user_prompt,
             user_csv_list,
             resolved_pagination,
+            available_fields,
             apply_script=apply_script
         )
 
@@ -404,12 +410,14 @@ class Orchestrator:
 
         start_sample = time.time()
         page_sample = self.page_sample(url)
-        print(f"page_sample: \n{page_sample["page_sample_result"]}\n")
+        print(f"page_sample: \n{page_sample['page_sample_result']}\n")
         end_sample = time.time()
 
         start_analisys = time.time()
         filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice)
+
         resolved_pagination = self.resolve_pagination(url, page_sample["page_sample_result"], page_sample["html_to_analize"])
+        available_fields = page_sample["page_sample_result"].get("available_fields", [])
 
         print(f"\n\nresolved_pagination: {resolved_pagination} \n")
         print(f"filter_analisys: \n{filter_analisys}\n")
@@ -435,6 +443,7 @@ class Orchestrator:
             user_prompt,
             user_csv_list,
             resolved_pagination,
+            available_fields,
             apply_script=apply_script
         )
         end_extract = time.time()
