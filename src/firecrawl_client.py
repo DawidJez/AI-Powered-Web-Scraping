@@ -4,6 +4,7 @@ from firecrawl import FirecrawlApp
 from dotenv import load_dotenv
 import os
 import difflib
+from itertools import product
 
 load_dotenv()
 
@@ -225,6 +226,67 @@ class FirecrawlClient:
             "links": result.links,
             "metadata": result.metadata
         }
+
+    def _build_actions_for_filter(self, resolved: dict, selected_value: str) -> list:
+        """
+        Build the exact action sequence used today for a single resolved filter.
+        This is the compatibility layer for the multi-filter refactor.
+        """
+        actions = []
+        gate_scripts = resolved.get("gate_scripts") or []
+        final_script = resolved.get("final_script")
+        available_options = resolved.get("available_options") or []
+        interaction_type = resolved.get("interaction_type")
+        filter_apply_script = resolved.get("apply_script")
+
+        for s in gate_scripts:
+            actions.append({"type": "executeJavascript", "script": s})
+            actions.append({"type": "wait", "milliseconds": 800})
+
+        if interaction_type == "type" and final_script:
+            actions.append({"type": "executeJavascript", "script": final_script})
+            actions.append({"type": "wait", "milliseconds": 800})
+            actions.append({"type": "write", "text": selected_value})
+            actions.append({"type": "wait", "milliseconds": 800})
+            actions.append({"type": "press", "key": "Enter"})
+            actions.append({"type": "wait", "milliseconds": 1500})
+        elif available_options:
+            chosen_script = self._resolve_choosen_option(available_options, selected_value)
+            if not chosen_script:
+                raise ValueError(f"DEBUG: no matching option found for '{selected_value}'")
+            actions.append({"type": "executeJavascript", "script": chosen_script})
+            actions.append({"type": "wait", "milliseconds": 1500})
+        elif final_script:
+            actions.append({"type": "executeJavascript", "script": final_script})
+            actions.append({"type": "wait", "milliseconds": 800})
+            actions.append({"type": "write", "text": selected_value})
+            actions.append({"type": "wait", "milliseconds": 800})
+            actions.append({"type": "press", "key": "Enter"})
+            actions.append({"type": "wait", "milliseconds": 1500})
+        else:
+            raise ValueError("DEBUG: resolved filter has neither a final_script nor available_options")
+
+        if filter_apply_script:
+            actions.append({"type": "executeJavascript", "script": filter_apply_script})
+            actions.append({"type": "wait", "milliseconds": 1500})
+        else:
+            actions.append({"type": "wait", "milliseconds": 700})
+
+        return actions
+
+    def _build_multi_filter_actions(self, resolved_filters: list[dict], selected_values: list[str]) -> list:
+        """
+        Build one combined action sequence for several filters in order.
+        This mirrors the old single-filter behavior for each filter while keeping all
+        actions in one scrape request.
+        """
+        if len(resolved_filters) != len(selected_values):
+            raise ValueError("resolved_filters and selected_values must have the same length")
+
+        actions = []
+        for resolved, selected_value in zip(resolved_filters, selected_values):
+            actions.extend(self._build_actions_for_filter(resolved, selected_value))
+        return actions
 
     # helper for dropdown selectors cuz ai is messing with it
     def _build_select_script(select_selector: str, option_value: str) -> str:

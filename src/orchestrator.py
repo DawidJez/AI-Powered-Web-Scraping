@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import re
 import os
+from itertools import product
 
 from ai_extractor import AIExtractor
 from firecrawl_client import FirecrawlClient
@@ -115,47 +116,104 @@ class Orchestrator:
             "apply_script": analisys.get("apply_script")
         }
 
-    def filtered_scraping(self, url: str, analisys: dict, page_sample_result: dict, csv_list: list[str], user_choices: list) -> dict:
+    def filtered_scraping(self, url: str, analisys: dict, page_sample_result: dict, csv_list: list[str], user_choices: list, html: str | None = None, filters: list[dict] | None = None) -> dict:
         """For now, we give this function user_choices as user choice of filter + help phrases for html extract"""
-        user_choice = user_choices[0]
-        filter_options = page_sample_result.get("filter_options",[])
-        available_fields = page_sample_result.get("available_fields", [])
+        normalized_filters = self.normalize_filters(filters=filters, user_filter_choice=user_choices, user_csv_list=csv_list)
 
-        matched_filter = next((f for f in filter_options if user_choice.lower() in f["name"].lower()), None)
-        filter = matched_filter
+        if len(normalized_filters) == 1:
+            user_choice = user_choices[0]
+            filter_options = page_sample_result.get("filter_options",[])
+            available_fields = page_sample_result.get("available_fields", [])
 
-        if matched_filter is None:
-            matched_filter = next((f for f in available_fields if user_choice.lower() in f.lower()), None) # dict -> str
+            matched_filter = next((f for f in filter_options if user_choice.lower() in f["name"].lower()), None)
+            filter = matched_filter
 
             if matched_filter is None:
-                raise ValueError(f"Filter '{user_choice}' not found in detected filter_options")
-            
-            identifier_hints = ["number", "id", "code", "part", "sku", "mpn", "name"]
-            matched_filter_lc = matched_filter.lower()
+                matched_filter = next((f for f in available_fields if user_choice.lower() in f.lower()), None) # dict -> str
 
-            if any(hint in matched_filter_lc for hint in identifier_hints):
-                filter = {
-                    "name": matched_filter,
-                    "cardinality": "identifier",
-                    "example_values": None
+                if matched_filter is None:
+                    raise ValueError(f"Filter '{user_choice}' not found in detected filter_options")
+                
+                identifier_hints = ["number", "id", "code", "part", "sku", "mpn", "name"]
+                matched_filter_lc = matched_filter.lower()
+
+                if any(hint in matched_filter_lc for hint in identifier_hints):
+                    filter = {
+                        "name": matched_filter,
+                        "cardinality": "identifier",
+                        "example_values": None
+                    }
+                else:
+                    filter = {
+                        "name": matched_filter,
+                        "cardinality": "category",
+                        "example_values": None
+                    }
+
+            filter["search_terms"] = [choice for choice in user_choices]
+            resolved = self.resolve_scripts(url, analisys, filter)
+            apply_script = resolved.get("apply_script")
+
+            filtered_data = self.firecrawl.fetch_filtered_data(url, resolved, filter, csv_list, resolved["available_options"], apply_script=apply_script)
+
+            return {
+                "filtered_data": filtered_data,
+                "resolved_scripts": resolved
                 }
-            else:
-                filter = {
-                    "name": matched_filter,
-                    "cardinality": "category",
-                    "example_values": None
+
+        if html is None:
+            html = page_sample_result.get("html_to_analize") if isinstance(page_sample_result, dict) else None
+        if html is None:
+            raise ValueError("HTML content is required for multi-filter scraping")
+
+        resolved_filters = []
+        for filter_def in normalized_filters:
+            name = (filter_def.get("name") or "").strip()
+            hints = list(filter_def.get("hints") or [])
+            values = list(filter_def.get("values") or [])
+            if not name:
+                continue
+
+            search_terms = [name] + [hint for hint in hints if hint]
+            current_analysis = self.search_for_filters(html, search_terms)
+            resolved = self.resolve_scripts(
+                url,
+                current_analysis,
+                {
+                    "name": name,
+                    "cardinality": "identifier" if values else "identifier",
+                    "example_values": values[:1],
+                    "search_terms": search_terms,
                 }
+            )
+            resolved_filters.append({
+                "resolved": resolved,
+                "name": name,
+                "values": values,
+                "hints": hints,
+            })
 
-        filter["search_terms"] = [choice for choice in user_choices]
-        resolved = self.resolve_scripts(url, analisys, filter)
-        apply_script = resolved.get("apply_script")
+        if not resolved_filters:
+            raise ValueError("No valid filters were provided for multi-filter scraping")
 
-        filtered_data = self.firecrawl.fetch_filtered_data(url, resolved, filter, csv_list, resolved["available_options"], apply_script=apply_script)
+        value_lists = [entry["values"] if entry["values"] else [""] for entry in resolved_filters]
+        combinations = list(product(*value_lists))
+        all_runs = []
+
+        for combo in combinations:
+            selected_values = list(combo)
+            run_resolved = [entry["resolved"] for entry in resolved_filters]
+            fetch_result = self.firecrawl.fetch_multi_filtered_data(url, run_resolved, selected_values)
+            all_runs.append(fetch_result)
 
         return {
-            "filtered_data": filtered_data,
-            "resolved_scripts": resolved
+            "filtered_data": all_runs,
+            "resolved_scripts": {
+                "multi_filter": True,
+                "filters": resolved_filters,
+                "combinations": list(combinations),
             }
+        }
 
     def resolve_pagination(self, url: str, page_sample: dict, html: str) -> dict:
         safe_url = re.sub(r"[^a-zA-Z0-9_-]", "_", url) # sanitize url to create a valid filename
@@ -199,26 +257,38 @@ class Orchestrator:
             available_fields = []
 
         all_results = []
+        data = filtered_data.get("filtered_data")
+        scripts = filtered_data.get("resolved_scripts")
 
-        data = filtered_data["filtered_data"]
-        scripts = filtered_data["resolved_scripts"]
+        # Multi-filter results produced by filtered_scraping return a list of fetch
+        # results (one per combination) and a resolved_scripts dict containing
+        # "multi_filter": True plus the "combinations" list. Handle both
+        # single-filter (legacy) and multi-filter shapes here.
+        if isinstance(scripts, dict) and scripts.get("multi_filter"):
+            combinations = scripts.get("combinations", [])
+            for idx, page_data in enumerate(data):
+                extracted = self.extractor.extract(page_data, user_prompt, available_fields)
+                all_results.append(extracted.get("records", []))
 
-        for item, page_data in zip(csv_list, data):
-            extracted = self.extractor.extract(page_data, user_prompt, available_fields)
-            
-            all_results.append(extracted["records"])
+                # Pagination for multi-filter combos is not yet fully supported.
+                # TODO: implement per-combination pagination using the resolved
+                # filter scripts for that combo if needed.
+        else:
+            for item, page_data in zip(csv_list, data):
+                extracted = self.extractor.extract(page_data, user_prompt, available_fields)
+                all_results.append(extracted["records"])
 
-            if "analog.com" in url and extracted.get("page_count") == None and extracted.get("records") and extracted.get("total_records_declared"):
-                extracted["page_count"] = math.ceil(extracted["total_records_declared"]/len(extracted["records"]))
-                extracted["paging_needed"] = bool(extracted["page_count"] > 1)
+                if "analog.com" in url and extracted.get("page_count") == None and extracted.get("records") and extracted.get("total_records_declared"):
+                    extracted["page_count"] = math.ceil(extracted["total_records_declared"]/len(extracted["records"]))
+                    extracted["paging_needed"] = bool(extracted["page_count"] > 1)
 
-            if extracted.get("paging_needed"):
-                page_count = extracted["page_count"]
-                new_html_pages = self.firecrawl.fetch_with_pagination(url, scripts, resolved_pagination, page_count, item, apply_script=apply_script)
+                if extracted.get("paging_needed"):
+                    page_count = extracted["page_count"]
+                    new_html_pages = self.firecrawl.fetch_with_pagination(url, scripts, resolved_pagination, page_count, item, apply_script=apply_script)
 
-                for page_html in new_html_pages:
-                    extracted_more = self.extractor.extract(page_html, user_prompt, available_fields)
-                    all_results.append(extracted_more["records"])
+                    for page_html in new_html_pages:
+                        extracted_more = self.extractor.extract(page_html, user_prompt, available_fields)
+                        all_results.append(extracted_more["records"])
 
         return all_results
     
@@ -354,12 +424,16 @@ class Orchestrator:
 
         apply_script = filter_analisys.get("apply_script")
         available_fields = page_sample["page_sample_result"].get("available_fields", [])
+
+        normalized_filters = self.normalize_filters(filters=None, user_filter_choice=user_filter_choice, user_csv_list=user_csv_list)
         
         filtered_data = self.filtered_scraping(
             url, filter_analisys,
             page_sample["page_sample_result"],
             user_csv_list,
-            user_filter_choice
+            user_filter_choice,
+            html=page_sample["html_to_analize"],
+            filters=normalized_filters
         )
 
         extracted_data = self.extract_data(
@@ -400,7 +474,7 @@ class Orchestrator:
             "records": flat_all_results
         }
 
-    def run_debug(self, url: str, user_prompt: str, user_filter_choice: list, user_csv_list: list, output_path: str, download_pdfs: bool = False):
+    def run_debug(self, url: str, user_prompt: str, user_filter_choice: list, user_csv_list: list, output_path: str, download_pdfs: bool = False, filters: list[dict] | None = None):
         """
         Almost same as run(), but with debug prints and timing at every stage - use during
         development/testing to see what's happening at each step.
@@ -418,6 +492,7 @@ class Orchestrator:
 
         resolved_pagination = self.resolve_pagination(url, page_sample["page_sample_result"], page_sample["html_to_analize"])
         available_fields = page_sample["page_sample_result"].get("available_fields", [])
+        normalized_filters = self.normalize_filters(filters=filters, user_filter_choice=user_filter_choice, user_csv_list=user_csv_list)
 
         print(f"\n\nresolved_pagination: {resolved_pagination} \n")
         print(f"filter_analisys: \n{filter_analisys}\n")
@@ -431,7 +506,9 @@ class Orchestrator:
             url, filter_analisys,
             page_sample["page_sample_result"],
             user_csv_list,
-            user_filter_choice
+            user_filter_choice,
+            html=page_sample["html_to_analize"],
+            filters=normalized_filters
         )
         end_filter = time.time()
 
@@ -483,8 +560,51 @@ class Orchestrator:
             "records": flat_all_results
         }
 
+    @staticmethod
+    def normalize_filters(filters: list[dict] | None = None, user_filter_choice: list | None = None, user_csv_list: list | None = None) -> list[dict]:
+        """
+        Accept both shapes during the migration:
+        1) new multi-filter format:
+           [{"name": "Product number", "hints": [...], "values": [...]}, ...]
+        2) legacy single-filter format:
+           user_filter_choice = ["Product number", "part number"]
+           user_csv_list = ["TMP75", "TMP117"]
+        """
+        if filters is not None:
+            normalized = []
+            for item in filters:
+                if not isinstance(item, dict):
+                    continue
+                normalized.append({
+                    "name": item.get("name", ""),
+                    "hints": list(item.get("hints") or []),
+                    "values": list(item.get("values") or []),
+                })
+            return normalized
 
+        if user_filter_choice is None and user_csv_list is None:
+            return []
 
+        name = user_filter_choice[0] if user_filter_choice else ""
+        hints = list(user_filter_choice[1:]) if user_filter_choice else []
+        values = list(user_csv_list) if user_csv_list else []
+
+        return [{"name": name, "hints": hints, "values": values}] if name else []
+
+    def resolve_filters(self, html: str, filters: list[dict]) -> list[dict]:
+        """
+        Resolve each filter independently using the existing AI logic.
+        This remains compatible with the old single-filter call path.
+        """
+        resolved = []
+        for filter_def in filters:
+            name = filter_def.get("name", "").strip()
+            hints = list(filter_def.get("hints") or [])
+            search_terms = [name] + [h for h in hints if h]
+            if not name:
+                continue
+            resolved.append(self.search_for_filters(html, search_terms))
+        return resolved
 
     def test(self):
         ########################    ACTUAL TEST     #################################

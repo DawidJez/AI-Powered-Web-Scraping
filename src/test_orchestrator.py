@@ -80,11 +80,26 @@ TEST_CONFIGS = {
         "output_path": "data/excel/output_test_5.xlsx"
     },
     "6": {
-        "label": "Samtec",
-        "url": "https://www.samtec.com/picturesearch/flex-stack-solutionator", # script in current state is not able to multi-filter
-        "user_prompt": TEST6_PROMPT,
-        "user_filter_choice": ["Price", "0.37"],
-        "user_csv_list": ["0.37"],
+        "label": "Multi-filter test (template) Samtec",
+        "url": "https://TODO.example.com/replace-with-real-page",
+        "user_prompt": GENERIC_PROMPT,
+        "filters": [
+            {
+                "name": "Category",
+                "hints": ["Connector Housings"],
+                "values": ["Connector Housings"]
+            },
+            {
+                "name": "Product name",
+                "hints": ["CMC"],
+                "values": ["CMC"]
+            },
+            {
+                "name": "Series",
+                "hints": ["64321"],
+                "values": ["64321"]
+            }
+        ],
         "output_path": "data/excel/output_test_6.xlsx"
     },
     "7": {
@@ -104,12 +119,35 @@ TEST_CONFIGS = {
         "output_path": "data/excel/output_test_8.xlsx"
     },
     "9": {
-        "label": "Molex",
+        "label": "Molex1",
         "url": "https://www.molex.com/en-us/part-list/connectors", # wokrs fine
         "user_prompt": GENERIC_PROMPT,
         "user_filter_choice": ["Product Name", "Micro-Latch"],
         "user_csv_list": ["Micro-Latch"],
         "output_path": "data/excel/output_test_9.xlsx"
+    },
+    "10": {
+        "label": "Molex2 - Multi-filter test (template) Samtec",
+        "url": "https://www.molex.com/en-us/part-list/connectors",
+        "user_prompt": GENERIC_PROMPT,
+        "filters": [
+            {
+                "name": "Category",
+                "hints": ["Connector Housings"],
+                "values": ["Connector Housings"]
+            },
+            {
+                "name": "Product name",
+                "hints": ["CMC"],
+                "values": ["CMC"]
+            },
+            {
+                "name": "Series",
+                "hints": ["64321"],
+                "values": ["64321"]
+            }
+        ],
+        "output_path": "data/excel/output_test_10.xlsx"
     },
 }
 
@@ -128,12 +166,26 @@ def main():
         print(f"Unknown option: '{choice}'")
         return
 
+    if "filters" in config:
+        filters = config["filters"]
+        user_filter_choice = []
+        user_csv_list = []
+        for filter_def in filters:
+            user_filter_choice.append(filter_def["name"])
+            user_filter_choice.extend(filter_def.get("hints", []))
+            user_csv_list.extend(filter_def.get("values", []))
+    else:
+        filters = None
+        user_filter_choice = config["user_filter_choice"]
+        user_csv_list = config["user_csv_list"]
+
     orchestrator.run_debug(
         url=config["url"],
         user_prompt=config["user_prompt"],
-        user_filter_choice=config["user_filter_choice"],
-        user_csv_list=config["user_csv_list"],
-        output_path=config["output_path"] 
+        user_filter_choice=user_filter_choice,
+        user_csv_list=user_csv_list,
+        output_path=config["output_path"],
+        filters=filters
     )
 
 
