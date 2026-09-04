@@ -127,26 +127,31 @@ TEST_CONFIGS = {
         "output_path": "data/excel/output_test_9.xlsx"
     },
     "10": {
-        "label": "Molex2 - Multi-filter test (template) Samtec",
+        "label": "Molex2 - Multi-filter test (template)",
         "url": "https://www.molex.com/en-us/part-list/connectors",
         "user_prompt": GENERIC_PROMPT,
         "filters": [
-            {
-                "name": "Category",
-                "hints": ["Connector Housings"],
-                "values": ["Connector Housings"]
-            },
-            {
-                "name": "Product name",
-                "hints": ["CMC"],
-                "values": ["CMC"]
-            },
-            {
-                "name": "Series",
-                "hints": ["64321"],
-                "values": ["64321"]
-            }
-        ],
+        {
+            "name": "Category",
+            "hints": ["I/O Connectors"],
+            "values": ["I/O Connectors"]
+        },
+        {
+            "name": "Product Name",
+            "hints": ["2.00mm I/O Connectors"],
+            "values": ["2.00mm I/O Connectors"]
+        },
+        {
+            "name": "Type",
+            "hints": ["N/A"],
+            "values": ["N/A"]
+        },
+        {
+            "name": "Circuits (Loaded)",
+            "hints": [],
+            "values": ["6"]
+        }
+    ],
         "output_path": "data/excel/output_test_10.xlsx"
     },
 }
@@ -168,12 +173,9 @@ def main():
 
     if "filters" in config:
         filters = config["filters"]
+        # do not aggregate filters into legacy arguments; pass filters directly
         user_filter_choice = []
         user_csv_list = []
-        for filter_def in filters:
-            user_filter_choice.append(filter_def["name"])
-            user_filter_choice.extend(filter_def.get("hints", []))
-            user_csv_list.extend(filter_def.get("values", []))
     else:
         filters = None
         user_filter_choice = config["user_filter_choice"]

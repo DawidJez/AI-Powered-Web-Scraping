@@ -248,8 +248,8 @@ class Orchestrator:
             url: str, 
             filtered_data: dict, 
             user_prompt: str, 
-            csv_list: list, 
-            resolved_pagination: dict,
+            csv_list: list | None = None, 
+            resolved_pagination: dict | None = None,
             available_fields: list[str] | None = None,
             apply_script: str = None
         ):
@@ -274,11 +274,13 @@ class Orchestrator:
                 # TODO: implement per-combination pagination using the resolved
                 # filter scripts for that combo if needed.
         else:
-            for item, page_data in zip(csv_list, data):
+            for page_data in data:
+                # page_data should include an 'item' key attached by FirecrawlClient
+                item = page_data.get("item") if isinstance(page_data, dict) else None
                 extracted = self.extractor.extract(page_data, user_prompt, available_fields)
-                all_results.append(extracted["records"])
+                all_results.append(extracted.get("records", []))
 
-                if "analog.com" in url and extracted.get("page_count") == None and extracted.get("records") and extracted.get("total_records_declared"):
+                if "analog.com" in url and extracted.get("page_count") is None and extracted.get("records") and extracted.get("total_records_declared"):
                     extracted["page_count"] = math.ceil(extracted["total_records_declared"]/len(extracted["records"]))
                     extracted["paging_needed"] = bool(extracted["page_count"] > 1)
 
@@ -288,7 +290,7 @@ class Orchestrator:
 
                     for page_html in new_html_pages:
                         extracted_more = self.extractor.extract(page_html, user_prompt, available_fields)
-                        all_results.append(extracted_more["records"])
+                        all_results.append(extracted_more.get("records", []))
 
         return all_results
     
@@ -373,6 +375,54 @@ class Orchestrator:
         print("=" * 60 + "\n")
 
 
+    def normalize_filters(self, filters: list[dict] | None = None, user_filter_choice: list | None = None, user_csv_list: list | None = None) -> list[dict]:
+        """
+        Accept both shapes during the migration:
+        1) new multi-filter format:
+            [{"name": "Product number", "hints": [...], "values": [...]}, ...]
+        2) legacy single-filter format:
+            user_filter_choice = ["Product number", "part number"]
+            user_csv_list = ["TMP75", "TMP117"]
+        """
+        if filters is not None:
+            normalized = []
+            for item in filters:
+                if not isinstance(item, dict):
+                    continue
+                normalized.append({
+                    "name": item.get("name", ""),
+                    "hints": list(item.get("hints") or []),
+                    "values": list(item.get("values") or []),
+                })
+            return normalized
+
+        if user_filter_choice is None and user_csv_list is None:
+            return []
+
+        name = user_filter_choice[0] if user_filter_choice else ""
+        hints = list(user_filter_choice[1:]) if user_filter_choice else []
+        values = list(user_csv_list) if user_csv_list else []
+
+        return [{"name": name, "hints": hints, "values": values}] if name else []
+
+
+    def resolve_filters(self, html: str, filters: list[dict]) -> list[dict]:
+        """
+        Resolve each filter independently using the existing AI logic.
+        This remains compatible with the old single-filter call path.
+        """
+        resolved = []
+        for filter_def in filters:
+            name = filter_def.get("name", "").strip()
+            hints = list(filter_def.get("hints") or [])
+            search_terms = [name] + [h for h in hints if h]
+            if not name:
+                continue
+            resolved.append(self.search_for_filters(html, search_terms))
+        return resolved
+
+
+
     def run(self):
         """
         Interactive entrypoint - the whole program lives here.
@@ -385,27 +435,48 @@ class Orchestrator:
         page_sample = self.page_sample(url)
         self._print_sample(page_sample["page_sample_result"])
 
-        print("How do you want to provide the list of values to search for?")
-        print("  1. Type manually (values separated by commas ',', semicolons ';')")
-        print("  2. Choose a file from computer (CSV / TXT / Excel)")
-        choice = input("Choose 1 or 2: ").strip()
+        try:
+            filters_count = int(input("\nHow many filters do you want to set? [1]: ").strip() or "1")
+        except ValueError:
+            filters_count = 1
+        filters_count = max(1, filters_count)
 
-        if choice == "2":
-            user_csv_list = self.resolve_csv()
-        else:
-            raw = input("Enter values separated by commas/semicolons: ")
-            user_csv_list = [x.strip() for x in re.split(r"[,;]", raw) if x.strip()]
+        filters = []
+        for i in range(filters_count):
+            print(f"\n--- Filter {i + 1}/{filters_count} ---")
+            filter_name = input("Filter field name (e.g. 'Product number'): ").strip()
+            if not filter_name:
+                print("Empty name - skipping this filter.")
+                continue
 
-        if not user_csv_list:
-            print("No values provided to search for - aborting.")
+            hint1 = input("Optional helper word 1 (press Enter to skip): ").strip()
+            hint2 = input("Optional helper word 2 (press Enter to skip): ").strip()
+            hints = [h for h in (hint1, hint2) if h]
+
+            if i == 0:
+                print("How do you want to provide values for this filter?")
+                print("  1. Type manually (values separated by commas ',', semicolons ';')")
+                print("  2. Choose a file from computer (CSV / TXT / Excel)")
+                choice = input("Choose 1 or 2: ").strip()
+                if choice == "2":
+                    values = self.resolve_csv()
+                else:
+                    raw = input("Enter values separated by commas/semicolons: ")
+                    values = [x.strip() for x in re.split(r"[,;]", raw) if x.strip()]
+            else:
+                raw = input("Enter values separated by commas/semicolons: ")
+                values = [x.strip() for x in re.split(r"[,;]", raw) if x.strip()]
+
+            if not values:
+                print("No values provided for this filter - skipping it.")
+                continue
+
+            print(f"Accepted {len(values)} values (first 20): {values[:20]}")
+            filters.append({"name": filter_name, "hints": hints, "values": values})
+
+        if not filters:
+            print("No filters provided - aborting.")
             return
-
-        print(f"\nAccepted {len(user_csv_list)} first 20 values: {user_csv_list[:20]}")
-
-        filter_name = input("\nEnter the name of the filter field to search by (e.g. 'Product number'): ").strip()
-        hint1 = input("Optional helper word 1 (press Enter to skip): ").strip()
-        hint2 = input("Optional helper word 2 (press Enter to skip): ").strip()
-        user_filter_choice = [filter_name] + [h for h in (hint1, hint2) if h]
 
         print("\nWhat do you want to extract from each found product? (describe freely, e.g. 'number, price, package')")
         user_prompt = input("> ").strip()
@@ -419,28 +490,44 @@ class Orchestrator:
 
         print("\nDownloading data, this may take a moment...\n")
 
-        filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice)
-        resolved_pagination = self.resolve_pagination(url, page_sample["page_sample_result"], page_sample["html_to_analize"])
+        normalized_filters = self.normalize_filters(filters=filters)
+        user_filter_choice = (
+            [normalized_filters[0]["name"]] + normalized_filters[0]["hints"] if normalized_filters else []
+        )
 
-        apply_script = filter_analisys.get("apply_script")
+        resolved_pagination = self.resolve_pagination(url, page_sample["page_sample_result"], page_sample["html_to_analize"])
         available_fields = page_sample["page_sample_result"].get("available_fields", [])
 
-        normalized_filters = self.normalize_filters(filters=None, user_filter_choice=user_filter_choice, user_csv_list=user_csv_list)
-        
-        filtered_data = self.filtered_scraping(
-            url, filter_analisys,
-            page_sample["page_sample_result"],
-            user_csv_list,
-            user_filter_choice,
-            html=page_sample["html_to_analize"],
-            filters=normalized_filters
-        )
+        if len(normalized_filters) == 1:
+            filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice)
+            apply_script = filter_analisys.get("apply_script")
+
+            filtered_data = self.filtered_scraping(
+                url,
+                filter_analisys,
+                page_sample["page_sample_result"],
+                normalized_filters[0]["values"] if normalized_filters else [],
+                user_filter_choice,
+                html=page_sample["html_to_analize"],
+                filters=None,
+            )
+        else:
+            apply_script = None
+            filtered_data = self.filtered_scraping(
+                url,
+                None,
+                page_sample["page_sample_result"],
+                [],
+                [],
+                html=page_sample["html_to_analize"],
+                filters=normalized_filters,
+            )
 
         extracted_data = self.extract_data(
             url,
             filtered_data,
             user_prompt,
-            user_csv_list,
+            None,
             resolved_pagination,
             available_fields,
             apply_script=apply_script
@@ -488,28 +575,44 @@ class Orchestrator:
         end_sample = time.time()
 
         start_analisys = time.time()
-        filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice)
+        normalized_filters = self.normalize_filters(filters=filters, user_filter_choice=user_filter_choice, user_csv_list=user_csv_list)
 
         resolved_pagination = self.resolve_pagination(url, page_sample["page_sample_result"], page_sample["html_to_analize"])
         available_fields = page_sample["page_sample_result"].get("available_fields", [])
-        normalized_filters = self.normalize_filters(filters=filters, user_filter_choice=user_filter_choice, user_csv_list=user_csv_list)
 
         print(f"\n\nresolved_pagination: {resolved_pagination} \n")
-        print(f"filter_analisys: \n{filter_analisys}\n")
-        apply_script = filter_analisys.get("apply_script")
+        apply_script = None
+
+        if len(normalized_filters) == 1:
+            # legacy single-filter path
+            filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice)
+            print(f"filter_analisys: \n{filter_analisys}\n")
+            apply_script = filter_analisys.get("apply_script")
+        else:
+            print(f"resolved_filters (to be resolved per-filter): {normalized_filters}\n")
         
         end_analisys = time.time()
 
         start_filter = time.time()
         print(f"filtering the data ...\n")
-        filtered_data = self.filtered_scraping(
-            url, filter_analisys,
-            page_sample["page_sample_result"],
-            user_csv_list,
-            user_filter_choice,
-            html=page_sample["html_to_analize"],
-            filters=normalized_filters
-        )
+        if len(normalized_filters) == 1:
+            filtered_data = self.filtered_scraping(
+                url, filter_analisys,
+                page_sample["page_sample_result"],
+                normalized_filters[0]["values"] if normalized_filters else [],
+                user_filter_choice,
+                html=page_sample["html_to_analize"],
+                filters=None
+            )
+        else:
+            filtered_data = self.filtered_scraping(
+                url, None,
+                page_sample["page_sample_result"],
+                [],
+                [],
+                html=page_sample["html_to_analize"],
+                filters=normalized_filters
+            )
         end_filter = time.time()
 
         start_extract = time.time()
@@ -518,7 +621,7 @@ class Orchestrator:
             url,
             filtered_data,
             user_prompt,
-            user_csv_list,
+            None,
             resolved_pagination,
             available_fields,
             apply_script=apply_script
@@ -559,68 +662,3 @@ class Orchestrator:
             "record_count": len(flat_all_results),
             "records": flat_all_results
         }
-
-    @staticmethod
-    def normalize_filters(filters: list[dict] | None = None, user_filter_choice: list | None = None, user_csv_list: list | None = None) -> list[dict]:
-        """
-        Accept both shapes during the migration:
-        1) new multi-filter format:
-           [{"name": "Product number", "hints": [...], "values": [...]}, ...]
-        2) legacy single-filter format:
-           user_filter_choice = ["Product number", "part number"]
-           user_csv_list = ["TMP75", "TMP117"]
-        """
-        if filters is not None:
-            normalized = []
-            for item in filters:
-                if not isinstance(item, dict):
-                    continue
-                normalized.append({
-                    "name": item.get("name", ""),
-                    "hints": list(item.get("hints") or []),
-                    "values": list(item.get("values") or []),
-                })
-            return normalized
-
-        if user_filter_choice is None and user_csv_list is None:
-            return []
-
-        name = user_filter_choice[0] if user_filter_choice else ""
-        hints = list(user_filter_choice[1:]) if user_filter_choice else []
-        values = list(user_csv_list) if user_csv_list else []
-
-        return [{"name": name, "hints": hints, "values": values}] if name else []
-
-    def resolve_filters(self, html: str, filters: list[dict]) -> list[dict]:
-        """
-        Resolve each filter independently using the existing AI logic.
-        This remains compatible with the old single-filter call path.
-        """
-        resolved = []
-        for filter_def in filters:
-            name = filter_def.get("name", "").strip()
-            hints = list(filter_def.get("hints") or [])
-            search_terms = [name] + [h for h in hints if h]
-            if not name:
-                continue
-            resolved.append(self.search_for_filters(html, search_terms))
-        return resolved
-
-    def test(self):
-        ########################    ACTUAL TEST     #################################
-        start_test = time.time()
-
-        print("DEBUG: Start of the test")
-
-        # url = "https://www.hebe.pl/wlosy/" -->Strong CloudFlare
-        # url = "https://www.ti.com/product-category/rf-microwave/rf-power-detectors/products.html" works great
-        url = "https://www.ti.com/product-category/sensors/products.html#" # --> shit cool
-        # url = "https://www.analog.com/en/product-category/sensors.html" --> doesnt work that far away from target
-        url = "https://www.analog.com/en/parametricsearch/2475#/"
-        # url = "https://www.vishay.com/en/leds/smd/"
-        #url = "https://www.infineon.com/products/battery-management-ics#products"
-        url = "https://www.infineon.com/products/isolation/digital-isolators#products"
-
-        # if pdf wanted always include "- Full URL of the PDF datasheet" and "- MPN" (as your producy/part) 
-        # so pdf downloader would work
-        

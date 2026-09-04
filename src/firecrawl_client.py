@@ -309,22 +309,71 @@ class FirecrawlClient:
         if filter["cardinality"]== "identifier":
             for item in items_list:
                 result = self._single_fetch(url, item, resolved, apply_script)
-                filtered_data.append(result)
+                # attach the original item value so callers can map results to inputs
+                if isinstance(result, dict):
+                    result_with_item = dict(result)
+                    result_with_item.setdefault("item", item)
+                    filtered_data.append(result_with_item)
+                else:
+                    filtered_data.append({"markdown": None, "links": None, "metadata": None, "item": item})
 
         elif filter.get("bulk_search_supported"):
             result = self._bulk_fetch(url, items_list, resolved, apply_script)
-            filtered_data.append(result)
+            # represent bulk result with joined items as item
+            separator = ", "
+            joined = separator.join(items_list)
+            result_with_item = dict(result)
+            result_with_item.setdefault("item", joined)
+            filtered_data.append(result_with_item)
 
         elif filter["cardinality"]== "category":
             for value in items_list:
                 choosen_script = self._resolve_choosen_option(available_options, value)
 
                 result = self._category_fetch(url, resolved, choosen_script, apply_script)
-                filtered_data.append(result)
+                if isinstance(result, dict):
+                    r = dict(result)
+                    r.setdefault("item", value)
+                    filtered_data.append(r)
+                else:
+                    filtered_data.append({"markdown": None, "links": None, "metadata": None, "item": value})
         else:
             raise NotImplementedError("unrecognized filter cardinality")
 
         return filtered_data
+
+    def fetch_multi_filtered_data(self, url: str, resolved_filters: list[dict], selected_values: list[str], apply_script: str = None, wait_for: int = 3000) -> dict:
+        """
+        Execute a single scrape that applies multiple filters in order using
+        the combined action sequence built by `_build_multi_filter_actions`.
+        Returns a dict compatible with other fetch helpers: `markdown`, `links`, `metadata`,
+        and an `item` field representing the selected_values joined by comma.
+        """
+        actions = self._build_multi_filter_actions(resolved_filters, selected_values)
+
+        if apply_script:
+            actions.append({"type": "executeJavascript", "script": apply_script})
+            actions.append({"type": "wait", "milliseconds": 1500})
+        else:
+            actions.append({"type": "wait", "milliseconds": 700})
+
+        result = self.app.scrape_url(
+            url=url,
+            formats=['markdown', 'links'],
+            wait_for=wait_for,
+            actions=actions,
+            proxy="auto"
+        )
+
+        separator = ", "
+        joined = separator.join(selected_values)
+
+        return {
+            "markdown": result.markdown,
+            "links": result.links,
+            "metadata": result.metadata,
+            "item": joined
+        }
     
     def fetch_with_given_actions(self, url: str, actions: list, wait_for: int = 3000):
         

@@ -7,6 +7,7 @@ from google.genai import errors
 
 import os
 import json
+import re
 from bs4 import BeautifulSoup
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed # maybe used in the future
@@ -33,12 +34,16 @@ class AIExtractor:
             if not short_term:
                 continue
 
+            pattern = re.compile(r'(?<![A-Za-z0-9])' + re.escape(short_term) + r'(?![A-Za-z0-9])')
+            
             start_idx = 0
             term_window_count = 0
             while len(clean_html) > start_idx and term_window_count < max_windows_per_term:
-                idx = clean_html.find(short_term, start_idx)
-                if idx == -1:
+                m = pattern.search(clean_html, start_idx)
+                if not m:
                     break
+
+                idx = m.start()
 
                 start = max(0, idx - window_size)
                 end = min(len(clean_html), idx + len(short_term) + window_size)
@@ -429,6 +434,9 @@ class AIExtractor:
             f"--- Occurrence {w['occurrence_index']} ---\n{w['fragment']}"
             for w in html_windows
         )
+
+        with open("data/shit/html_windows.html", "w", encoding="utf-8") as f:
+            f.write(combined_windows)
         
         if len(combined_windows) > 150000:
             raise ValueError(f"DEBUG: MAYDAY we got a problem with length {len(combined_windows)}")
