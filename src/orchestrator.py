@@ -116,41 +116,44 @@ class Orchestrator:
             "apply_script": analisys.get("apply_script")
         }
 
-    def filtered_scraping(self, url: str, analisys: dict, page_sample_result: dict, csv_list: list[str], user_choices: list, html: str | None = None, filters: list[dict] | None = None) -> dict:
-        """For now, we give this function user_choices as user choice of filter + help phrases for html extract"""
-        normalized_filters = self.normalize_filters(filters=filters, user_filter_choice=user_choices, user_csv_list=csv_list)
+    def filtered_scraping(self, url: str, page_sample_result: dict, filters: list[dict], html: str | None = None) -> dict:
+        """filters: [{"name": ..., "hints": [...], "values": [...]}, ...] - always this shape wether 1 or more filters"""
+        normalized_filters = self.normalize_filters(filters=filters)
+
+        if html is None:
+            html = page_sample_result.get("html_to_analize") if isinstance(page_sample_result, dict) else None
+        if html is None:
+            raise ValueError("HTML content is required for filter resolution")
 
         if len(normalized_filters) == 1:
-            user_choice = user_choices[0]
-            filter_options = page_sample_result.get("filter_options",[])
+            name = normalized_filters[0]["name"]
+            hints = normalized_filters[0]["hints"]
+            csv_list = normalized_filters[0]["values"]
+            search_terms = [name] + [h for h in hints if h]
+
+            filter_options = page_sample_result.get("filter_options", [])
             available_fields = page_sample_result.get("available_fields", [])
 
-            matched_filter = next((f for f in filter_options if user_choice.lower() in f["name"].lower()), None)
+            matched_filter = next((f for f in filter_options if name.lower() in f["name"].lower()), None)
             filter = matched_filter
 
             if matched_filter is None:
-                matched_filter = next((f for f in available_fields if user_choice.lower() in f.lower()), None) # dict -> str
+                matched_filter = next((f for f in available_fields if name.lower() in f.lower()), None)
 
                 if matched_filter is None:
-                    raise ValueError(f"Filter '{user_choice}' not found in detected filter_options")
-                
+                    raise ValueError(f"Filter '{name}' not found in detected filter_options")
+
                 identifier_hints = ["number", "id", "code", "part", "sku", "mpn", "name"]
                 matched_filter_lc = matched_filter.lower()
 
                 if any(hint in matched_filter_lc for hint in identifier_hints):
-                    filter = {
-                        "name": matched_filter,
-                        "cardinality": "identifier",
-                        "example_values": None
-                    }
+                    filter = {"name": matched_filter, "cardinality": "identifier", "example_values": None}
                 else:
-                    filter = {
-                        "name": matched_filter,
-                        "cardinality": "category",
-                        "example_values": None
-                    }
+                    filter = {"name": matched_filter, "cardinality": "category", "example_values": None}
 
-            filter["search_terms"] = [choice for choice in user_choices]
+            filter["search_terms"] = search_terms
+
+            analisys = self.search_for_filters(html, search_terms)
             resolved = self.resolve_scripts(url, analisys, filter)
             apply_script = resolved.get("apply_script")
 
@@ -158,14 +161,11 @@ class Orchestrator:
 
             return {
                 "filtered_data": filtered_data,
-                "resolved_scripts": resolved
-                }
-
-        if html is None:
-            html = page_sample_result.get("html_to_analize") if isinstance(page_sample_result, dict) else None
-        if html is None:
-            raise ValueError("HTML content is required for multi-filter scraping")
-
+                "resolved_scripts": resolved,
+                "apply_script": apply_script,
+            }
+        
+        # multi-filter
         resolved_filters = []
         for filter_def in normalized_filters:
             name = (filter_def.get("name") or "").strip()
@@ -181,7 +181,7 @@ class Orchestrator:
                 current_analysis,
                 {
                     "name": name,
-                    "cardinality": "identifier" if values else "identifier",
+                    "cardinality": "identifier",
                     "example_values": values[:1],
                     "search_terms": search_terms,
                 }
@@ -212,7 +212,8 @@ class Orchestrator:
                 "multi_filter": True,
                 "filters": resolved_filters,
                 "combinations": list(combinations),
-            }
+            },
+            "apply_script": None,  # per-filter apply_script inside resolved_filters[i]["resolved"] - pagination for multi combos not supported yet (TODO)
         }
 
     def resolve_pagination(self, url: str, page_sample: dict, html: str) -> dict:
@@ -244,38 +245,30 @@ class Orchestrator:
         return resolved_pagination
 
     def extract_data(
-            self, 
-            url: str, 
-            filtered_data: dict, 
-            user_prompt: str, 
-            csv_list: list | None = None, 
+            self,
+            url: str,
+            filtered_data: dict,
+            user_prompt: str,
             resolved_pagination: dict | None = None,
             available_fields: list[str] | None = None,
-            apply_script: str = None
         ):
         if available_fields is None:
             available_fields = []
+
+        apply_script = filtered_data.get("apply_script")
 
         all_results = []
         data = filtered_data.get("filtered_data")
         scripts = filtered_data.get("resolved_scripts")
 
-        # Multi-filter results produced by filtered_scraping return a list of fetch
-        # results (one per combination) and a resolved_scripts dict containing
-        # "multi_filter": True plus the "combinations" list. Handle both
-        # single-filter (legacy) and multi-filter shapes here.
         if isinstance(scripts, dict) and scripts.get("multi_filter"):
             combinations = scripts.get("combinations", [])
             for idx, page_data in enumerate(data):
                 extracted = self.extractor.extract(page_data, user_prompt, available_fields)
                 all_results.append(extracted.get("records", []))
-
-                # Pagination for multi-filter combos is not yet fully supported.
-                # TODO: implement per-combination pagination using the resolved
-                # filter scripts for that combo if needed.
+                # TODO: pagination per multi-filter combo not yet supported
         else:
             for page_data in data:
-                # page_data should include an 'item' key attached by FirecrawlClient
                 item = page_data.get("item") if isinstance(page_data, dict) else None
                 extracted = self.extractor.extract(page_data, user_prompt, available_fields)
                 all_results.append(extracted.get("records", []))
@@ -293,8 +286,8 @@ class Orchestrator:
                         all_results.append(extracted_more.get("records", []))
 
         return all_results
+
     
-    #*THIS FUNC IS WRITTEN BY AI*
     def resolve_csv(self, source: str | None = None) -> list[str]:
         """
         Turns a CSV/TXT/Excel file into a flat list of string values.
@@ -491,46 +484,23 @@ class Orchestrator:
         print("\nDownloading data, this may take a moment...\n")
 
         normalized_filters = self.normalize_filters(filters=filters)
-        user_filter_choice = (
-            [normalized_filters[0]["name"]] + normalized_filters[0]["hints"] if normalized_filters else []
-        )
 
         resolved_pagination = self.resolve_pagination(url, page_sample["page_sample_result"], page_sample["html_to_analize"])
         available_fields = page_sample["page_sample_result"].get("available_fields", [])
 
-        if len(normalized_filters) == 1:
-            filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice)
-            apply_script = filter_analisys.get("apply_script")
-
-            filtered_data = self.filtered_scraping(
-                url,
-                filter_analisys,
-                page_sample["page_sample_result"],
-                normalized_filters[0]["values"] if normalized_filters else [],
-                user_filter_choice,
-                html=page_sample["html_to_analize"],
-                filters=None,
-            )
-        else:
-            apply_script = None
-            filtered_data = self.filtered_scraping(
-                url,
-                None,
-                page_sample["page_sample_result"],
-                [],
-                [],
-                html=page_sample["html_to_analize"],
-                filters=normalized_filters,
-            )
+        filtered_data = self.filtered_scraping(
+            url,
+            page_sample["page_sample_result"],
+            normalized_filters,
+            html=page_sample["html_to_analize"],
+        )
 
         extracted_data = self.extract_data(
             url,
             filtered_data,
             user_prompt,
-            None,
             resolved_pagination,
             available_fields,
-            apply_script=apply_script
         )
 
         flat_all_results = [record for sublist in extracted_data for record in sublist]
@@ -561,6 +531,9 @@ class Orchestrator:
             "records": flat_all_results
         }
 
+
+    
+
     def run_debug(self, url: str, user_prompt: str, user_filter_choice: list, user_csv_list: list, output_path: str, download_pdfs: bool = False, filters: list[dict] | None = None):
         """
         Almost same as run(), but with debug prints and timing at every stage - use during
@@ -581,38 +554,18 @@ class Orchestrator:
         available_fields = page_sample["page_sample_result"].get("available_fields", [])
 
         print(f"\n\nresolved_pagination: {resolved_pagination} \n")
-        apply_script = None
-
-        if len(normalized_filters) == 1:
-            # legacy single-filter path
-            filter_analisys = self.search_for_filters(page_sample["html_to_analize"], user_filter_choice)
-            print(f"filter_analisys: \n{filter_analisys}\n")
-            apply_script = filter_analisys.get("apply_script")
-        else:
-            print(f"resolved_filters (to be resolved per-filter): {normalized_filters}\n")
-        
+        print(f"normalized_filters: {normalized_filters}\n")
         end_analisys = time.time()
 
         start_filter = time.time()
         print(f"filtering the data ...\n")
-        if len(normalized_filters) == 1:
-            filtered_data = self.filtered_scraping(
-                url, filter_analisys,
-                page_sample["page_sample_result"],
-                normalized_filters[0]["values"] if normalized_filters else [],
-                user_filter_choice,
-                html=page_sample["html_to_analize"],
-                filters=None
-            )
-        else:
-            filtered_data = self.filtered_scraping(
-                url, None,
-                page_sample["page_sample_result"],
-                [],
-                [],
-                html=page_sample["html_to_analize"],
-                filters=normalized_filters
-            )
+
+        filtered_data = self.filtered_scraping(
+            url,
+            page_sample["page_sample_result"],
+            normalized_filters,
+            html=page_sample["html_to_analize"],
+        )
         end_filter = time.time()
 
         start_extract = time.time()
@@ -621,10 +574,8 @@ class Orchestrator:
             url,
             filtered_data,
             user_prompt,
-            None,
             resolved_pagination,
             available_fields,
-            apply_script=apply_script
         )
         end_extract = time.time()
 
