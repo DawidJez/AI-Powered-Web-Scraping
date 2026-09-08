@@ -60,6 +60,7 @@ class FirecrawlClient:
 
         return all_pages
 
+    # currently not used
     def merge_pages(self, pages: list[dict[str, str]]) -> dict[str, str]:
         # Merge multiple paginated page results into a single markdown/html document.
         if not pages:
@@ -76,30 +77,6 @@ class FirecrawlClient:
             "markdown": merged_markdown,
             "html": merged_html,
         }
-    
-    # gówno nie działa, za wolne, za głupie, za mało kredytów co kolwiek, jebał to pies trzeba własne kuźwa robić, 
-    # niech to szlag jasny trafi (tę linie copilot napisał akurat, wie co jest na rzeczy)
-    def fetch_data_ai(self, url: str, user_prompt: str, page_sample: dict, csv_list: list[str], model: str = "spark-1-pro", max_credits = 300):
-        mpns = json.dumps(csv_list)
-        print(f"DEBUG: csv_list = {mpns}")
-        print("DEBUG: I'm here in fetch_data_ai()")
-
-        prompt = (f"""
-            Context - here is a sample of the target page's content, to help you 
-            understand its structure and where to look:\n{page_sample}\n
-            Requested MPN list (csv_list): {mpns}
-            Task: {user_prompt}\n\n
-            The target page is: {url}
-        """)
-
-        result = self.app.agent(
-            prompt=prompt,
-            model=model,
-            max_credits=max_credits
-        )
-        print(f"DEBUG: agent credits used: {getattr(result, 'credits_used', 'unknown')}")
-
-        return result
     
     def _single_fetch(self,url: str, item: str, scripts: list, apply_script: str = None, wait_for: int = 3000) -> dict:
         actions = []
@@ -227,39 +204,42 @@ class FirecrawlClient:
             "metadata": result.metadata
         }
 
-    def _build_actions_for_filter(self, resolved: dict, selected_value: str) -> list:
+    def _build_actions_for_filter(self, resolved: dict, selected_values: list[str]) -> list:
         """
-        Build the exact action sequence used today for a single resolved filter.
-        This is the compatibility layer for the multi-filter refactor.
+        Build the action sequence for one resolved filter.
         """
         actions = []
         gate_scripts = resolved.get("gate_scripts") or []
         final_script = resolved.get("final_script")
         available_options = resolved.get("available_options") or []
-        interaction_type = resolved.get("interaction_type")
         filter_apply_script = resolved.get("apply_script")
 
         for s in gate_scripts:
             actions.append({"type": "executeJavascript", "script": s})
             actions.append({"type": "wait", "milliseconds": 800})
 
-        if interaction_type == "type" and final_script:
-            actions.append({"type": "executeJavascript", "script": final_script})
-            actions.append({"type": "wait", "milliseconds": 800})
-            actions.append({"type": "write", "text": selected_value})
-            actions.append({"type": "wait", "milliseconds": 800})
-            actions.append({"type": "press", "key": "Enter"})
-            actions.append({"type": "wait", "milliseconds": 1500})
-        elif available_options:
-            chosen_script = self._resolve_choosen_option(available_options, selected_value)
-            if not chosen_script:
-                raise ValueError(f"DEBUG: no matching option found for '{selected_value}'")
-            actions.append({"type": "executeJavascript", "script": chosen_script})
-            actions.append({"type": "wait", "milliseconds": 1500})
+        if available_options:
+            if not selected_values:
+                raise ValueError("DEBUG: category filter has no values to select")
+            
+            for value in selected_values:
+                chosen_script = self._resolve_choosen_option(available_options, value)
+
+                if not chosen_script:
+                    raise ValueError(f"DEBUG: no matching option found for '{value}'")
+                
+                actions.append({"type": "executeJavascript", "script": chosen_script})
+                actions.append({"type": "wait", "milliseconds": 1500})
+
         elif final_script:
+            if not selected_values:
+                raise ValueError("DEBUG: identifier filter has no value to type")
+            
+            text = selected_values[0] if len(selected_values) == 1 else ", ".join(selected_values)
+
             actions.append({"type": "executeJavascript", "script": final_script})
             actions.append({"type": "wait", "milliseconds": 800})
-            actions.append({"type": "write", "text": selected_value})
+            actions.append({"type": "write", "text": text})
             actions.append({"type": "wait", "milliseconds": 800})
             actions.append({"type": "press", "key": "Enter"})
             actions.append({"type": "wait", "milliseconds": 1500})
@@ -298,49 +278,90 @@ class FirecrawlClient:
             select.dispatchEvent(new Event('change', {{ bubbles: true }}));
         """
 
-    def fetch_filtered_data(self, url: str, resolved: list, filter: dict, items_list: list, available_options: list, apply_script: str = None) -> list[dict]:
-        filtered_data = []
+    def _label_for(self, category_entries: list[dict], extra_value: str | None) -> str:
+        parts = [f"{e['name']}={','.join(e.get('values') or [])}" for e in category_entries]
 
-        if resolved.get("available_options") and not resolved.get("final_script"): # it should be category so we had to make sure there will be fallback
-            filter["cardinality"] = "category"
-        elif resolved.get("final_script") and not resolved.get("available_options"):
-            filter["cardinality"] = "identifier"
+        if extra_value is not None:
+            parts.append(extra_value)
 
-        if filter["cardinality"]== "identifier":
-            for item in items_list:
-                result = self._single_fetch(url, item, resolved, apply_script)
-                # attach the original item value so callers can map results to inputs
-                if isinstance(result, dict):
-                    result_with_item = dict(result)
-                    result_with_item.setdefault("item", item)
-                    filtered_data.append(result_with_item)
-                else:
-                    filtered_data.append({"markdown": None, "links": None, "metadata": None, "item": item})
+        return "; ".join(parts)
 
-        elif filter.get("bulk_search_supported"):
-            result = self._bulk_fetch(url, items_list, resolved, apply_script)
-            # represent bulk result with joined items as item
-            separator = ", "
-            joined = separator.join(items_list)
-            result_with_item = dict(result)
-            result_with_item.setdefault("item", joined)
-            filtered_data.append(result_with_item)
+    def _run_fetch(self, url: str, category_actions: list, extra_actions: list, item_label: str,  wait_for: int = 3000) -> dict:
+        actions = category_actions + extra_actions
+        if not actions:
+            raise ValueError("No filters resolved to any action")
 
-        elif filter["cardinality"]== "category":
-            for value in items_list:
-                choosen_script = self._resolve_choosen_option(available_options, value)
+        result = self.app.scrape_url(
+            url=url,
+            formats=['markdown', 'links'],
+            wait_for=wait_for,
+            actions=actions,
+            proxy="auto"
+        )
+        return {
+            "markdown": result.markdown,
+            "links": result.links,
+            "metadata": result.metadata,
+            "item": item_label
+        }
+    
+    def fetch_filtered_data(self, url: str, resolved_filters: list[dict]) -> list[dict]:
+        """
+        Generalized fetching!
+        - category filters (available_options present): ALL matched values clicked in ONE
+        combined sequence, constant across every fetch below.
+        - at most one identifier filter (final_script only) supported:
+            0 values -> ignored
+            1 value, or N values with bulk_search_supported -> folded into the single combined fetch
+            N values, not bulk -> N separate fetches, each with the SAME category actions
+            + one identifier value (this is the only case that multiplies fetches)
+        """
+        category_entries = []
+        identifier_entries = []
 
-                result = self._category_fetch(url, resolved, choosen_script, apply_script)
-                if isinstance(result, dict):
-                    r = dict(result)
-                    r.setdefault("item", value)
-                    filtered_data.append(r)
-                else:
-                    filtered_data.append({"markdown": None, "links": None, "metadata": None, "item": value})
-        else:
-            raise NotImplementedError("unrecognized filter cardinality")
+        for entry in resolved_filters:
+            resolved = entry["resolved"]
+            has_options = bool(resolved.get("available_options"))
+            has_final = bool(resolved.get("final_script"))
 
-        return filtered_data
+            if has_options:
+                category_entries.append(entry)
+            elif has_final:
+                identifier_entries.append(entry)
+            else:
+                raise ValueError(f"DEBUG: filter '{entry.get('name')}' resolved with neither final_script nor available_options")
+
+        if len(identifier_entries) > 1:
+            raise NotImplementedError("Multiple identifier-type filters in one run is not supported yet")
+
+        category_actions = []
+        for entry in category_entries:
+            values = entry.get("values") or []
+
+            if not values:
+                continue
+            category_actions.extend(self._build_actions_for_filter(entry["resolved"], values))
+
+            if not identifier_entries:
+                return [self._run_fetch(url, category_actions, [], self._label_for(category_entries, None))]
+
+            identifier_entry = identifier_entries[0]
+            identifier_values = identifier_entry.get("values") or []
+            bulk_supported = bool(identifier_entry.get("bulk_search_supported"))
+
+            if not identifier_values:
+                return [self._run_fetch(url, category_actions, [], self._label_for(category_entries, None))]
+
+            if len(identifier_values) == 1 or bulk_supported:
+                extra = self._build_actions_for_filter(identifier_entry["resolved"], identifier_values)
+                joined = identifier_values[0] if len(identifier_values) == 1 else ", ".join(identifier_values)
+                return [self._run_fetch(url, category_actions, extra, self._label_for(category_entries, joined))]
+
+            results = []
+            for value in identifier_values:
+                extra = self._build_actions_for_filter(identifier_entry["resolved"], [value])
+                results.append(self._run_fetch(url, category_actions, extra, self._label_for(category_entries, value)))
+            return results
 
     def fetch_multi_filtered_data(self, url: str, resolved_filters: list[dict], selected_values: list[str], apply_script: str = None, wait_for: int = 3000) -> dict:
         """

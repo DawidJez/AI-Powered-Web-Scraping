@@ -117,13 +117,16 @@ class Orchestrator:
         }
 
     def filtered_scraping(self, url: str, page_sample_result: dict, filters: list[dict], html: str | None = None) -> dict:
-        """filters: [{"name": ..., "hints": [...], "values": [...]}, ...] - always this shape wether 1 or more filters"""
+        """filters: [{"name": ..., "hints": [...], "values": [...]}, ...] - always this shape now."""
         normalized_filters = self.normalize_filters(filters=filters)
 
         if html is None:
             html = page_sample_result.get("html_to_analize") if isinstance(page_sample_result, dict) else None
         if html is None:
             raise ValueError("HTML content is required for filter resolution")
+
+        if not normalized_filters:
+            raise ValueError("No valid filters were provided for scraping")
 
         if len(normalized_filters) == 1:
             name = normalized_filters[0]["name"]
@@ -164,17 +167,19 @@ class Orchestrator:
                 "resolved_scripts": resolved,
                 "apply_script": apply_script,
             }
-        
-        # multi-filter
+
         resolved_filters = []
+
         for filter_def in normalized_filters:
             name = (filter_def.get("name") or "").strip()
             hints = list(filter_def.get("hints") or [])
             values = list(filter_def.get("values") or [])
+
             if not name:
                 continue
 
             search_terms = [name] + [hint for hint in hints if hint]
+            
             current_analysis = self.search_for_filters(html, search_terms)
             resolved = self.resolve_scripts(
                 url,
@@ -196,6 +201,13 @@ class Orchestrator:
         if not resolved_filters:
             raise ValueError("No valid filters were provided for multi-filter scraping")
 
+        # TODO (next step, needs firecrawl.py): kill cartesian product here.
+        # Filters that support multi-select on-page (click_checkbox etc.) should have
+        # ALL matched values clicked into ONE combined actions sequence - no per-value
+        # fetch. Only filters that are genuinely single-select (dropdown/radio) should
+        # branch into separate runs. Currently still doing full cartesian product
+        # below - this is WRONG per confirmed requirement, kept as-is until
+        # fetch_multi_filtered_data is reviewed.
         value_lists = [entry["values"] if entry["values"] else [""] for entry in resolved_filters]
         combinations = list(product(*value_lists))
         all_runs = []
@@ -213,7 +225,7 @@ class Orchestrator:
                 "filters": resolved_filters,
                 "combinations": list(combinations),
             },
-            "apply_script": None,  # per-filter apply_script inside resolved_filters[i]["resolved"] - pagination for multi combos not supported yet (TODO)
+            "apply_script": None,
         }
 
     def resolve_pagination(self, url: str, page_sample: dict, html: str) -> dict:
