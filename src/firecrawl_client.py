@@ -205,14 +205,12 @@ class FirecrawlClient:
         }
 
     def _build_actions_for_filter(self, resolved: dict, selected_values: list[str]) -> list:
-        """
-        Build the action sequence for one resolved filter.
-        """
+        """Builds ONLY the gate + selection actions for one filter. apply_script is
+        handled separately by the caller (once, at the end of the whole sequence)."""
         actions = []
         gate_scripts = resolved.get("gate_scripts") or []
         final_script = resolved.get("final_script")
         available_options = resolved.get("available_options") or []
-        filter_apply_script = resolved.get("apply_script")
 
         for s in gate_scripts:
             actions.append({"type": "executeJavascript", "script": s})
@@ -236,7 +234,6 @@ class FirecrawlClient:
                 raise ValueError("DEBUG: identifier filter has no value to type")
             
             text = selected_values[0] if len(selected_values) == 1 else ", ".join(selected_values)
-
             actions.append({"type": "executeJavascript", "script": final_script})
             actions.append({"type": "wait", "milliseconds": 800})
             actions.append({"type": "write", "text": text})
@@ -245,12 +242,6 @@ class FirecrawlClient:
             actions.append({"type": "wait", "milliseconds": 1500})
         else:
             raise ValueError("DEBUG: resolved filter has neither a final_script nor available_options")
-
-        if filter_apply_script:
-            actions.append({"type": "executeJavascript", "script": filter_apply_script})
-            actions.append({"type": "wait", "milliseconds": 1500})
-        else:
-            actions.append({"type": "wait", "milliseconds": 700})
 
         return actions
 

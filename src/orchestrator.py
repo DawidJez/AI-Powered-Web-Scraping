@@ -128,45 +128,9 @@ class Orchestrator:
         if not normalized_filters:
             raise ValueError("No valid filters were provided for scraping")
 
-        if len(normalized_filters) == 1:
-            name = normalized_filters[0]["name"]
-            hints = normalized_filters[0]["hints"]
-            csv_list = normalized_filters[0]["values"]
-            search_terms = [name] + [h for h in hints if h]
-
-            filter_options = page_sample_result.get("filter_options", [])
-            available_fields = page_sample_result.get("available_fields", [])
-
-            matched_filter = next((f for f in filter_options if name.lower() in f["name"].lower()), None)
-            filter = matched_filter
-
-            if matched_filter is None:
-                matched_filter = next((f for f in available_fields if name.lower() in f.lower()), None)
-
-                if matched_filter is None:
-                    raise ValueError(f"Filter '{name}' not found in detected filter_options")
-
-                identifier_hints = ["number", "id", "code", "part", "sku", "mpn", "name"]
-                matched_filter_lc = matched_filter.lower()
-
-                if any(hint in matched_filter_lc for hint in identifier_hints):
-                    filter = {"name": matched_filter, "cardinality": "identifier", "example_values": None}
-                else:
-                    filter = {"name": matched_filter, "cardinality": "category", "example_values": None}
-
-            filter["search_terms"] = search_terms
-
-            analisys = self.search_for_filters(html, search_terms)
-            resolved = self.resolve_scripts(url, analisys, filter)
-            apply_script = resolved.get("apply_script")
-
-            filtered_data = self.firecrawl.fetch_filtered_data(url, resolved, filter, csv_list, resolved["available_options"], apply_script=apply_script)
-
-            return {
-                "filtered_data": filtered_data,
-                "resolved_scripts": resolved,
-                "apply_script": apply_script,
-            }
+        filter_options = page_sample_result.get("filter_options", [])
+        available_fields = page_sample_result.get("available_fields", [])
+        identifier_hints = ["number", "id", "code", "part", "sku", "mpn", "name"]
 
         resolved_filters = []
 
@@ -179,18 +143,27 @@ class Orchestrator:
                 continue
 
             search_terms = [name] + [hint for hint in hints if hint]
+
+            matched_filter = next((f for f in filter_options if name.lower() in f["name"].lower()), None)
+            filter = matched_filter
+
+            if matched_filter is None:
+                matched_filter = next((f for f in available_fields if name.lower() in f.lower()), None)
+
+                if matched_filter is None:
+                    raise ValueError(f"Filter '{name}' not found in detected filter_options")
+
+                matched_filter_lc = matched_filter.lower()
+                if any(hint in matched_filter_lc for hint in identifier_hints):
+                    filter = {"name": matched_filter, "cardinality": "identifier", "example_values": None}
+                else:
+                    filter = {"name": matched_filter, "cardinality": "category", "example_values": None}
+
+            filter["search_terms"] = search_terms
             
             current_analysis = self.search_for_filters(html, search_terms)
-            resolved = self.resolve_scripts(
-                url,
-                current_analysis,
-                {
-                    "name": name,
-                    "cardinality": "identifier",
-                    "example_values": values[:1],
-                    "search_terms": search_terms,
-                }
-            )
+            resolved = self.resolve_scripts(url, current_analysis, filter)
+
             resolved_filters.append({
                 "resolved": resolved,
                 "name": name,
@@ -201,30 +174,11 @@ class Orchestrator:
         if not resolved_filters:
             raise ValueError("No valid filters were provided for multi-filter scraping")
 
-        # TODO (next step, needs firecrawl.py): kill cartesian product here.
-        # Filters that support multi-select on-page (click_checkbox etc.) should have
-        # ALL matched values clicked into ONE combined actions sequence - no per-value
-        # fetch. Only filters that are genuinely single-select (dropdown/radio) should
-        # branch into separate runs. Currently still doing full cartesian product
-        # below - this is WRONG per confirmed requirement, kept as-is until
-        # fetch_multi_filtered_data is reviewed.
-        value_lists = [entry["values"] if entry["values"] else [""] for entry in resolved_filters]
-        combinations = list(product(*value_lists))
-        all_runs = []
-
-        for combo in combinations:
-            selected_values = list(combo)
-            run_resolved = [entry["resolved"] for entry in resolved_filters]
-            fetch_result = self.firecrawl.fetch_multi_filtered_data(url, run_resolved, selected_values)
-            all_runs.append(fetch_result)
+        filtered_data = self.firecrawl.fetch_filtered_data(url, resolved_filters)
 
         return {
-            "filtered_data": all_runs,
-            "resolved_scripts": {
-                "multi_filter": True,
-                "filters": resolved_filters,
-                "combinations": list(combinations),
-            },
+            "filtered_data": filtered_data,
+            "resolved_scripts": resolved_filters,
             "apply_script": None,
         }
 
