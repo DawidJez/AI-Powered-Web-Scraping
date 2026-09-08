@@ -286,7 +286,7 @@ class FirecrawlClient:
 
         return "; ".join(parts)
 
-    def _run_fetch(self, url: str, category_actions: list, extra_actions: list, item_label: str,  wait_for: int = 3000) -> dict:
+    def _run_fetch(self, url: str, category_actions: list, extra_actions: list, item_label: str, identifier_value: str | None, wait_for: int) -> dict:
         actions = category_actions + extra_actions
         if not actions:
             raise ValueError("No filters resolved to any action")
@@ -302,7 +302,8 @@ class FirecrawlClient:
             "markdown": result.markdown,
             "links": result.links,
             "metadata": result.metadata,
-            "item": item_label
+            "item": item_label,
+            "identifier_value": identifier_value
         }
     
     def fetch_filtered_data(self, url: str, resolved_filters: list[dict]) -> list[dict]:
@@ -343,24 +344,24 @@ class FirecrawlClient:
             category_actions.extend(self._build_actions_for_filter(entry["resolved"], values))
 
             if not identifier_entries:
-                return [self._run_fetch(url, category_actions, [], self._label_for(category_entries, None))]
+                return [self._run_fetch(url, category_actions, [], self._label_for(category_entries, None), None)]
 
             identifier_entry = identifier_entries[0]
             identifier_values = identifier_entry.get("values") or []
             bulk_supported = bool(identifier_entry.get("bulk_search_supported"))
 
             if not identifier_values:
-                return [self._run_fetch(url, category_actions, [], self._label_for(category_entries, None))]
+                return [self._run_fetch(url, category_actions, [], self._label_for(category_entries, None), None)]
 
             if len(identifier_values) == 1 or bulk_supported:
                 extra = self._build_actions_for_filter(identifier_entry["resolved"], identifier_values)
                 joined = identifier_values[0] if len(identifier_values) == 1 else ", ".join(identifier_values)
-                return [self._run_fetch(url, category_actions, extra, self._label_for(category_entries, joined))]
+                return [self._run_fetch(url, category_actions, extra, self._label_for(category_entries, joined), joined)]
 
             results = []
             for value in identifier_values:
                 extra = self._build_actions_for_filter(identifier_entry["resolved"], [value])
-                results.append(self._run_fetch(url, category_actions, extra, self._label_for(category_entries, value)))
+                results.append(self._run_fetch(url, category_actions, extra, self._label_for(category_entries, value), value))
             return results
 
     def fetch_multi_filtered_data(self, url: str, resolved_filters: list[dict], selected_values: list[str], apply_script: str = None, wait_for: int = 3000) -> dict:
@@ -409,58 +410,40 @@ class FirecrawlClient:
         return {"html": result.html}    
     
     def fetch_with_pagination(
-            self, 
-            url: str, 
-            scripts: list, 
-            resolved_pagination: dict, 
-            page_count: int, 
-            item: str,
-            apply_script: str = None,
+            self,
+            url: str,
+            resolved_filters: list[dict],
+            resolved_pagination: dict,
+            page_count: int,
+            identifier_value: str | None,
             wait_for: int = 3000
         ):
-
+        """
+        Re-applies the same filters used for the original fetch before paging - each
+        scrape_url call in Firecrawl starts from a fresh page load, so filters must be
+        reconstructed from scratch. Category filters are constant (same values as the
+        original fetch); identifier_value re-types the one raw value that produced this
+        specific fetch's first page (None if there was no identifier filter involved).
+        """
         actions = []
-        
-        gate_scripts = scripts["gate_scripts"]
-        final_script = scripts["final_script"]
+
+        category_entries = [e for e in resolved_filters if e["resolved"].get("available_options")]
+        identifier_entries = [e for e in resolved_filters if not e["resolved"].get("available_options") and e["resolved"].get("final_script")]
+
+        for entry in category_entries:
+            values = entry.get("values") or []
+            if not values:
+                continue
+            actions.extend(self._build_actions_for_filter(entry["resolved"], values))
+
+        if identifier_entries and identifier_value:
+            actions.extend(self._build_actions_for_filter(identifier_entries[0]["resolved"], [identifier_value]))
+
         pagination_script = resolved_pagination["next_button_script"]
-
-        interaction_type = scripts.get("interaction_type")
-        available_options = scripts.get("available_options")
-
-        # executing gate scripts
-        if gate_scripts:
-            for s in gate_scripts:
-                actions.append({"type": "executeJavascript", "script": s})
-                actions.append({"type": "wait", "milliseconds": 800})
-
-        # executing final script
-        # if single fetch
-        if interaction_type == "type" and final_script:
-            actions.append({"type": "executeJavascript", "script": final_script})
-            actions.append({"type": "wait", "milliseconds": 800})
-            actions.append({"type": "write", "text": item})
-            actions.append({"type": "wait", "milliseconds": 1500})
-        # if category fetch
-        elif available_options:
-            chosen_script = self._resolve_choosen_option(available_options, item)
-            actions.append({"type": "executeJavascript", "script": chosen_script})
-            actions.append({"type": "wait", "milliseconds": 1500})
-
-        else:
-            raise ValueError(f"DEBUG: don't know how to apply filter for item='{item}', missing final_script and available_options")
-
-        # scraping every page except the first one
         for _ in range(page_count - 1):
             actions.append({"type": "executeJavascript", "script": pagination_script})
             actions.append({"type": "wait", "milliseconds": 1500})
             actions.append({"type": "scrape"})
-
-        if apply_script:
-            actions.append({"type": "executeJavascript", "script": apply_script})
-            actions.append({"type": "wait", "milliseconds": 1500})
-        else:
-            actions.append({"type": "wait", "milliseconds": 700})
 
         result = self.app.scrape_url(
             url=url,

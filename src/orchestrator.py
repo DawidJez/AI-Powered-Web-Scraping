@@ -267,35 +267,25 @@ class Orchestrator:
         if available_fields is None:
             available_fields = []
 
-        apply_script = filtered_data.get("apply_script")
-
         all_results = []
         data = filtered_data.get("filtered_data")
-        scripts = filtered_data.get("resolved_scripts")
+        
+        for page_data in data:
+            extracted = self.extractor.extract(page_data, user_prompt, available_fields)
+            all_results.append(extracted.get("records", []))
 
-        if isinstance(scripts, dict) and scripts.get("multi_filter"):
-            combinations = scripts.get("combinations", [])
-            for idx, page_data in enumerate(data):
-                extracted = self.extractor.extract(page_data, user_prompt, available_fields)
-                all_results.append(extracted.get("records", []))
-                # TODO: pagination per multi-filter combo not yet supported
-        else:
-            for page_data in data:
-                item = page_data.get("item") if isinstance(page_data, dict) else None
-                extracted = self.extractor.extract(page_data, user_prompt, available_fields)
-                all_results.append(extracted.get("records", []))
+            if "analog.com" in url and extracted.get("page_count") is None and extracted.get("records") and extracted.get("total_records_declared"):
+                extracted["page_count"] = math.ceil(extracted["total_records_declared"]/len(extracted["records"]))
+                extracted["paging_needed"] = bool(extracted["page_count"] > 1)
 
-                if "analog.com" in url and extracted.get("page_count") is None and extracted.get("records") and extracted.get("total_records_declared"):
-                    extracted["page_count"] = math.ceil(extracted["total_records_declared"]/len(extracted["records"]))
-                    extracted["paging_needed"] = bool(extracted["page_count"] > 1)
+            if extracted.get("paging_needed"):
+                page_count = extracted["page_count"]
+                identifier_value = page_data.get("identifier_value") if isinstance(page_data, dict) else None
+                new_html_pages = self.firecrawl.fetch_with_pagination(url, filtered_data.get("resolved_scripts"), resolved_pagination, page_count, identifier_value)
 
-                if extracted.get("paging_needed"):
-                    page_count = extracted["page_count"]
-                    new_html_pages = self.firecrawl.fetch_with_pagination(url, scripts, resolved_pagination, page_count, item, apply_script=apply_script)
-
-                    for page_html in new_html_pages:
-                        extracted_more = self.extractor.extract(page_html, user_prompt, available_fields)
-                        all_results.append(extracted_more.get("records", []))
+                for page_html in new_html_pages:
+                    extracted_more = self.extractor.extract(page_html, user_prompt, available_fields)
+                    all_results.append(extracted_more.get("records", []))
 
         return all_results
 
