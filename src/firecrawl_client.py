@@ -245,6 +245,18 @@ class FirecrawlClient:
 
         return actions
 
+    def _apply_action(self, resolved_filters: list[dict]) -> list:
+        # only first apply script required cuz first occurence is passed to every other find_script in resolve_scripts
+        apply_script = next((e["resolved"].get("apply_script") for e in resolved_filters if e["resolved"].get("apply_script")), None)
+
+        if apply_script:
+            return [
+                {"type": "executeJavascript", "script": apply_script},
+                {"type": "wait", "milliseconds": 1500}
+            ]
+        return [{"type": "wait", "milliseconds": 700}]
+
+
     def _build_multi_filter_actions(self, resolved_filters: list[dict], selected_values: list[str]) -> list:
         """
         Build one combined action sequence for several filters in order.
@@ -277,8 +289,8 @@ class FirecrawlClient:
 
         return "; ".join(parts)
 
-    def _run_fetch(self, url: str, category_actions: list, extra_actions: list, item_label: str, identifier_value: str | None, wait_for: int) -> dict:
-        actions = category_actions + extra_actions
+    def _run_fetch(self, url: str, category_actions: list, extra_actions: list, apply_actions: list, item_label: str, identifier_value: str | None, wait_for: int) -> dict:
+        actions = category_actions + extra_actions + apply_actions
         if not actions:
             raise ValueError("No filters resolved to any action")
 
@@ -326,6 +338,8 @@ class FirecrawlClient:
         if len(identifier_entries) > 1:
             raise NotImplementedError("Multiple identifier-type filters in one run is not supported yet")
 
+        apply_actions = self._apply_action(category_entries + identifier_entries)
+
         category_actions = []
         for entry in category_entries:
             values = entry.get("values") or []
@@ -334,26 +348,26 @@ class FirecrawlClient:
                 continue
             category_actions.extend(self._build_actions_for_filter(entry["resolved"], values))
 
-            if not identifier_entries:
-                return [self._run_fetch(url, category_actions, [], self._label_for(category_entries, None), None)]
+        if not identifier_entries:
+            return [self._run_fetch(url, category_actions, [], apply_actions, self._label_for(category_entries, None), None)]
 
-            identifier_entry = identifier_entries[0]
-            identifier_values = identifier_entry.get("values") or []
-            bulk_supported = bool(identifier_entry.get("bulk_search_supported"))
+        identifier_entry = identifier_entries[0]
+        identifier_values = identifier_entry.get("values") or []
+        bulk_supported = bool(identifier_entry.get("bulk_search_supported"))
 
-            if not identifier_values:
-                return [self._run_fetch(url, category_actions, [], self._label_for(category_entries, None), None)]
+        if not identifier_values:
+            return [self._run_fetch(url, category_actions, [], apply_actions, self._label_for(category_entries, None), None)]
 
-            if len(identifier_values) == 1 or bulk_supported:
-                extra = self._build_actions_for_filter(identifier_entry["resolved"], identifier_values)
-                joined = identifier_values[0] if len(identifier_values) == 1 else ", ".join(identifier_values)
-                return [self._run_fetch(url, category_actions, extra, self._label_for(category_entries, joined), joined)]
+        if len(identifier_values) == 1 or bulk_supported:
+            extra = self._build_actions_for_filter(identifier_entry["resolved"], identifier_values)
+            joined = identifier_values[0] if len(identifier_values) == 1 else ", ".join(identifier_values)
+            return [self._run_fetch(url, category_actions, extra, apply_actions, self._label_for(category_entries, joined), joined)]
 
-            results = []
-            for value in identifier_values:
-                extra = self._build_actions_for_filter(identifier_entry["resolved"], [value])
-                results.append(self._run_fetch(url, category_actions, extra, self._label_for(category_entries, value), value))
-            return results
+        results = []
+        for value in identifier_values:
+            extra = self._build_actions_for_filter(identifier_entry["resolved"], [value])
+            results.append(self._run_fetch(url, category_actions, extra, apply_actions, self._label_for(category_entries, value), value))
+        return results
 
     def fetch_multi_filtered_data(self, url: str, resolved_filters: list[dict], selected_values: list[str], apply_script: str = None, wait_for: int = 3000) -> dict:
         """
@@ -412,9 +426,7 @@ class FirecrawlClient:
         """
         Re-applies the same filters used for the original fetch before paging - each
         scrape_url call in Firecrawl starts from a fresh page load, so filters must be
-        reconstructed from scratch. Category filters are constant (same values as the
-        original fetch); identifier_value re-types the one raw value that produced this
-        specific fetch's first page (None if there was no identifier filter involved).
+        reconstructed from scratch.
         """
         actions = []
 
@@ -429,6 +441,8 @@ class FirecrawlClient:
 
         if identifier_entries and identifier_value:
             actions.extend(self._build_actions_for_filter(identifier_entries[0]["resolved"], [identifier_value]))
+
+        actions.extend(self._apply_action(resolved_filters))
 
         pagination_script = resolved_pagination["next_button_script"]
         for _ in range(page_count - 1):

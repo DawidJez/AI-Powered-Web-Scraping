@@ -133,16 +133,16 @@ class Orchestrator:
         identifier_hints = ["number", "id", "code", "part", "sku", "mpn", "name"]
 
         resolved_filters = []
+        known_apply_script = None
 
         for filter_def in normalized_filters:
             name = (filter_def.get("name") or "").strip()
             hints = list(filter_def.get("hints") or [])
             values = list(filter_def.get("values") or [])
-
             if not name:
                 continue
 
-            search_terms = [name] + [hint for hint in hints if hint]
+            search_terms = [name] + [h for h in hints if h]
 
             matched_filter = next((f for f in filter_options if name.lower() in f["name"].lower()), None)
             filter = matched_filter
@@ -160,9 +160,18 @@ class Orchestrator:
                     filter = {"name": matched_filter, "cardinality": "category", "example_values": None}
 
             filter["search_terms"] = search_terms
-            
-            current_analysis = self.search_for_filters(html, search_terms)
-            resolved = self.resolve_scripts(url, current_analysis, filter)
+
+            analisys = self.search_for_filters(html, search_terms)
+
+            # apply_script is one global button for the whole filter panel - once any filter's
+            # analysis finds it, feed it forward so later filters don't need to rediscover it
+            if not analisys.get("apply_script") and known_apply_script:
+                analisys["apply_script"] = known_apply_script
+
+            resolved = self.resolve_scripts(url, analisys, filter)
+
+            if not known_apply_script and resolved.get("apply_script"):
+                known_apply_script = resolved["apply_script"]
 
             resolved_filters.append({
                 "resolved": resolved,
@@ -172,14 +181,12 @@ class Orchestrator:
             })
 
         if not resolved_filters:
-            raise ValueError("No valid filters were provided for multi-filter scraping")
-
-        filtered_data = self.firecrawl.fetch_filtered_data(url, resolved_filters)
+            raise ValueError("No valid filters resolved for scraping")
 
         return {
-            "filtered_data": filtered_data,
+            "filtered_data": self.firecrawl.fetch_filtered_data(url, resolved_filters),
             "resolved_scripts": resolved_filters,
-            "apply_script": None,
+            "apply_script": known_apply_script,
         }
 
     def resolve_pagination(self, url: str, page_sample: dict, html: str) -> dict:
