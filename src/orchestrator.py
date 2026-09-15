@@ -571,7 +571,7 @@ class Orchestrator:
         print(f"DEBUG: suggestion time: {end_sample - start_sample:.2f}s")
         print(f"DEBUG: analisys time: {end_analisys - start_analisys:.2f}s")
         print(f"DEBUG: filtering data time: {end_filter - start_filter:.2f}s")
-        print(f"\nDEBUG: extracting data time: {end_extract - start_extract:.2f}s")
+        print(f"DEBUG: extracting data time: {end_extract - start_extract:.2f}s")
 
         return {
             "output_path": output_path,

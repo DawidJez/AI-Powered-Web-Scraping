@@ -139,6 +139,24 @@ class AIExtractor:
             "Catalog", "Automotive", "Industrial", "Military" is a rating/qualification tier; an em
             dash "—" or empty value means the field is not applicable/not available for this record.
 
+            # Field naming contract - CRITICAL
+            A "canonical field list" may be provided below (fields_instruction). If it is present, it
+            is BINDING and takes priority over anything you see on the page:
+            - Every record's JSON keys MUST come EXACTLY from that list - same spelling, same casing,
+            same punctuation/units in the key name (e.g. if the list says "MPN", never emit "Product
+            number", "Part Number", or any other synonym you happen to see as a column header on THIS
+            particular page).
+            - Recognize when a value you find on the page semantically matches one of the canonical
+            fields even if the page's own label differs (e.g. a page column literally labeled
+            "Product Number" still maps to the canonical key "MPN" if that's what's in the list) -
+            map by MEANING, not by copying the page's literal label.
+            - Never invent a new key that isn't in the canonical list, and never emit two different
+            keys for what is semantically the same field.
+            - If a canonical field has no value findable for a given record, set it to null - do not
+            omit the key and do not substitute a differently-named key instead.
+            - If NO canonical field list is provided, fall back to using keys matching the user's
+            requested field names from their own prompt instead.
+
             # Task
             Given the user's field request and the page content described above, extract the
             requested fields for matching records, using the field list declared elsewhere on the
@@ -148,9 +166,9 @@ class AIExtractor:
             Find ALL matching records - do not stop after the first match, and do not stop early
             even if you also need to report pagination info below. Record extraction is the
             PRIMARY task and must be fully exhaustive - go through the entire content from top to
-            bottom and extract every single matching record before moving on to anything else,
-            using keys matching the user's requested field names. If a field cannot be
-            confidently determined for a record, set it to null - never guess or fabricate a value.
+            bottom and extract every single matching record before moving on to anything else. If a
+            field cannot be confidently determined for a record, set it to null - never guess or
+            fabricate a value.
 
             # Pagination detection
             AFTER you have finished extracting every record above, separately check if the page
@@ -175,7 +193,7 @@ class AIExtractor:
             try:
                 response = self.client.models.generate_content(
                     model=self.model,
-                    contents=[f"Searching for: {user_prompt}\n\nContent:\n{markdown_content} \nand fields_instruction:\n {fields_instruction}"],
+                    contents=[f"fields_instruction (canonical JSON keys - see Field naming contract):\n{fields_instruction}\n\nSearching for: {user_prompt}\n\nContent:\n{markdown_content}"],
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
                         response_mime_type="application/json"
@@ -234,7 +252,10 @@ class AIExtractor:
             "verbatim, no renaming, no snake_case conversion, no synonyms:\n"
             + "\n".join(f"- {f}" for f in available_fields)
             + "\nIf a field's value isn't present for a given record, use null - "
-            "never omit the key and never invent a new key not in this list."
+            "never omit the key and never invent a new key not in this list. "
+            "\nAlso always check for a PDF/datasheet link for each record, even if it's not in "
+            "the list above and even if it only appears near the record's name/identifier rather "
+            "than in the main field list - if found, include it under a sensibly named key."
         )
 
         result = self._single_extract(filtered_data, user_prompt, fields_instruction)
