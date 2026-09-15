@@ -182,7 +182,9 @@ class Orchestrator:
 
         if not resolved_filters:
             raise ValueError("No valid filters resolved for scraping")
-
+        #print(f"DEBUG: resolved_filters = {resolved_filters}")
+        #return 0
+        
         return {
             "filtered_data": self.firecrawl.fetch_filtered_data(url, resolved_filters),
             "resolved_scripts": resolved_filters,

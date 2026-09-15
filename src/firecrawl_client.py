@@ -232,13 +232,10 @@ class FirecrawlClient:
         elif final_script:
             if not selected_values:
                 raise ValueError("DEBUG: identifier filter has no value to type")
-            
             text = selected_values[0] if len(selected_values) == 1 else ", ".join(selected_values)
-            actions.append({"type": "executeJavascript", "script": final_script})
-            actions.append({"type": "wait", "milliseconds": 800})
-            actions.append({"type": "write", "text": text})
-            actions.append({"type": "wait", "milliseconds": 800})
-            actions.append({"type": "press", "key": "Enter"})
+            
+            script = final_script.replace('"__VALUE__"', json.dumps(text))
+            actions.append({"type": "executeJavascript", "script": script})
             actions.append({"type": "wait", "milliseconds": 1500})
         else:
             raise ValueError("DEBUG: resolved filter has neither a final_script nor available_options")
@@ -289,7 +286,7 @@ class FirecrawlClient:
 
         return "; ".join(parts)
 
-    def _run_fetch(self, url: str, category_actions: list, extra_actions: list, apply_actions: list, item_label: str, identifier_value: str | None, wait_for: int) -> dict:
+    def _run_fetch(self, url: str, category_actions: list, extra_actions: list, apply_actions: list, item_label: str, identifier_value: str | None, wait_for: int = 3000) -> dict:
         actions = category_actions + extra_actions + apply_actions
         if not actions:
             raise ValueError("No filters resolved to any action")

@@ -501,7 +501,8 @@ class AIExtractor:
             can reach inside a shadow root.
 
             The snippet's final statement must actually perform the interaction (e.g. end with
-            `.click()` or `.focus()`), not just locate the element.
+            `.click()`, or for "type" interactions, the final dispatched keyup event), not just
+            locate the element.
 
             - NEVER use jQuery-style pseudo-selectors (:contains(), :has-text(), :eq(), :has()) -
             these are INVALID CSS and will throw "is not a valid selector" at runtime, even
@@ -519,10 +520,28 @@ class AIExtractor:
                 icon.click();
             })();
 
-            For "type" interactions specifically: the script should ONLY focus or click the
-            input element to activate it (e.g. `document.querySelector('...').focus();`).
-            Do NOT attempt to set .value or simulate typing in the script - actual text entry
-            is handled by a separate step after this script runs.
+            For "type" interactions specifically: the script must perform the FULL text entry
+            itself, not just focus the element. Use a native property setter (so framework-
+            controlled inputs, e.g. React, actually register the change) plus dispatched events
+            with `composed: true` on every event (required for the event to cross a Shadow DOM
+            boundary - without it, web components silently never see the input even though the
+            value visually appears):
+
+            (function() {
+                const input = /* scoped selector - see shadow DOM notes below for web components */;
+                const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                input.focus();
+                setter.call(input, "__VALUE__");
+                input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+                input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, composed: true, key: 'Enter' }));
+                input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, composed: true, key: 'Enter' }));
+            })();
+
+            Use the LITERAL string "__VALUE__" (with the double quotes, exactly as shown) as a
+            placeholder for the value to search for - never invent or guess a real value. This
+            placeholder is substituted with the actual search term by code AFTER you return the
+            script, not by you.
 
             # Scoping when elements repeat identically across columns
             Watch for elements carrying BOTH the generic header class AND a more specific role-indicating class 
@@ -674,9 +693,11 @@ class AIExtractor:
             Script pattern: for click-style interactions where clicking the outer custom
             element itself is enough, use it directly:
             document.querySelector("ti-search-field[placeholder='...']").click();
-            For "type"/"focus" interactions you MUST go through shadow DOM - do NOT call
-            .focus() directly on the custom element's outer tag:
-            document.querySelector("ti-search-field[placeholder='...']").shadowRoot.querySelector('input').focus();
+            For "type" interactions on shadow DOM web components you MUST reach the real input
+            through .shadowRoot.querySelector(...) - never assume a plain descendant selector
+            reaches inside a shadow root - then apply the full native-setter + dispatch pattern
+            from the "type" section above to that input, e.g.:
+            const input = document.querySelector("ti-search-field[placeholder='...']").shadowRoot.querySelector('input');
 
             If NONE of the fragments look like a real filter control (field-specific or gate),
             return null for both scripts, empty list for "available_options", and explain why
@@ -896,9 +917,28 @@ class AIExtractor:
             })();
             - The script's final statement must perform the interaction (.click()/.focus()), not
             just locate the element.
-            - For "type" interactions: ONLY focus/click the input to activate it
-            (document.querySelector('...').focus();). Do NOT set .value or simulate typing -
-            text entry is handled by a separate step after this script runs.
+            - For "type" interactions specifically: the script must perform the FULL text entry
+            itself, not just focus the element. Use a native property setter (so framework-
+            controlled inputs, e.g. React, actually register the change) plus dispatched events
+            with `composed: true` on every event (required for the event to cross a Shadow DOM
+            boundary - without it, web components silently never see the input even though the
+            value visually appears):
+
+            (function() {
+                const input = /* scoped selector - see shadow DOM notes below for web components */;
+                const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                input.focus();
+                setter.call(input, "__VALUE__");
+                input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+                input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, composed: true, key: 'Enter' }));
+                input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, composed: true, key: 'Enter' }));
+            })();
+
+            Use the LITERAL string "__VALUE__" (with the double quotes, exactly as shown) as a
+            placeholder for the value to search for - never invent or guess a real value. This
+            placeholder is substituted with the actual search term by code AFTER you return the
+            script, not by you.
 
             # Scoping - repeated identical controls across columns
             Watch for elements carrying BOTH the generic header class AND a more specific role-indicating class 
@@ -1023,8 +1063,9 @@ class AIExtractor:
 
             For click-style interactions, click the custom element directly:
             document.querySelector("ti-search-field[placeholder='...']").click();
-            For type/focus interactions, go through shadowRoot:
-            document.querySelector("ti-search-field[placeholder='...']").shadowRoot.querySelector('input').focus();
+            For "type" interactions on shadow DOM web components, reach the real input through
+            .shadowRoot.querySelector(...), then apply the full native-setter + dispatch pattern
+            from the "type" section above to that input.
 
             # What to avoid
             - A plain data-row link (<a>) navigating to an unrelated page, even if its text matches.
