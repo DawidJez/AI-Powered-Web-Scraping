@@ -233,7 +233,7 @@ class FirecrawlClient:
             if not selected_values:
                 raise ValueError("DEBUG: identifier filter has no value to type")
             text = selected_values[0] if len(selected_values) == 1 else ", ".join(selected_values)
-            
+
             script = final_script.replace('"__VALUE__"', json.dumps(text))
             actions.append({"type": "executeJavascript", "script": script})
             actions.append({"type": "wait", "milliseconds": 1500})
@@ -446,6 +446,8 @@ class FirecrawlClient:
             actions.append({"type": "executeJavascript", "script": pagination_script})
             actions.append({"type": "wait", "milliseconds": 1500})
             actions.append({"type": "scrape"})
+
+        print(f"DEBUG: actions: {actions}")
 
         result = self.app.scrape_url(
             url=url,

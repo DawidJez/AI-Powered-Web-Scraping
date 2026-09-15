@@ -251,11 +251,14 @@ class AIExtractor:
             "You MUST use exactly these field names as JSON keys for every record, "
             "verbatim, no renaming, no snake_case conversion, no synonyms:\n"
             + "\n".join(f"- {f}" for f in available_fields)
-            + "\nIf a field's value isn't present for a given record, use null - "
-            "never omit the key and never invent a new key not in this list. "
-            "\nAlso always check for a PDF/datasheet link for each record, even if it's not in "
-            "the list above and even if it only appears near the record's name/identifier rather "
-            "than in the main field list - if found, include it under a sensibly named key."
+            + "\n- MPN\n"
+            "- Full URL of the PDF datasheet\n"
+            "\nAlways include the last two fields above (MPN, Full URL of the PDF datasheet) "
+            "under EXACTLY those names, even if they aren't in the main field list and even if "
+            "they only appear near the record's name/identifier rather than in the main field "
+            "list - never rename them to a synonym you see on the page. "
+            "\nIf a field's value isn't present for a given record, use null - "
+            "never omit the key and never invent a new key not in this list."
         )
 
         result = self._single_extract(filtered_data, user_prompt, fields_instruction)
@@ -523,9 +526,10 @@ class AIExtractor:
                 cell.querySelector('SELECTOR').click();
             })();
             ```
-            Applies mainly to the GATE (repeated across columns); a panel revealed after clicking is usually
-            a singleton and can often be queried directly by its own unique attribute. Skip this scoping if
-            the element already has a unique attribute of its own.
+            This applies to the gate AND to any target/option script touching a repeated-class element —
+            never scope by a positional index (nth-child, [N]) alone; always locate via the header's own
+            text match first, exactly like the example above. Skip this scoping only when the element
+            already has its own unique, literal attribute (id, placeholder) that doesn't repeat elsewhere.
 
             # MULTIPLE OPTIONS MODE (click_checkbox / click_option / select_dropdown)
             Don't return one target_script — find ALL selectable options and report each as
@@ -768,9 +772,10 @@ class AIExtractor:
                 option.click();
             })();
             ```
-            Applies to the gate AND to any target/option script touching a repeated-class element. If the
-            control instead sits inside an already-opened singleton panel with its own unique attribute (id,
-            placeholder), a direct unscoped selector is fine — skip unnecessary scoping.
+            Applies to the gate AND to any target/option script touching a repeated-class element — never
+            scope by a positional index (nth-child, [N]) alone; always locate via the header's own text
+            match first, exactly like the example above. Skip this scoping only when the element already
+            has its own unique, literal attribute (id, placeholder) that doesn't repeat elsewhere.
 
             # MULTIPLE OPTIONS MODE (control_type=final_control AND click_checkbox/click_option/select_dropdown)
             Don't return one script — find ALL selectable options and report each as

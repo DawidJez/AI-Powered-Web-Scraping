@@ -518,7 +518,7 @@ class Orchestrator:
         resolved_pagination = self.resolve_pagination(url, page_sample["page_sample_result"], page_sample["html_to_analize"])
         available_fields = page_sample["page_sample_result"].get("available_fields", [])
 
-        print(f"\n\nresolved_pagination: {resolved_pagination} \n")
+        print(f"resolved_pagination: {resolved_pagination} \n")
         print(f"normalized_filters: {normalized_filters}\n")
         end_analisys = time.time()
 

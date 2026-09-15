@@ -59,8 +59,18 @@ TEST_CONFIGS = {
         "label": "Vishay - LEDs SMD",
         "url": "https://www.vishay.com/en/leds/smd/",
         "user_prompt": GENERIC_PROMPT,
-        "user_filter_choice": ["Dominant Wavelength Min.", "360", "562"],
-        "user_csv_list": ["360", "562"],
+        "filters": [
+            {
+                "name": "Dominant Wavelength Min.",
+                "hints": ["562"],
+                "values": ["562"]
+            },
+            {
+                "name": "Dominant Wavelength Typ.",
+                "hints": ["571"],
+                "values": ["571"]
+            }
+        ],
         "output_path": "data/excel/output_test_3.xlsx"
     },
     "4": {
