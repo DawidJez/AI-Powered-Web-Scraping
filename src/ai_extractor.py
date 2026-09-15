@@ -443,92 +443,41 @@ class AIExtractor:
         
         system_instruction = ("""
             # Role
-            You are given several HTML fragments, each showing a different occurrence of the
-            same target label somewhere on a page. Your job is to identify the FULL interaction
-            path needed to filter the page's data by this label - not just a single element.
+            You're given HTML fragments, each a different occurrence of a target field's label. Identify
+            the full interaction path needed to filter by it — not just one element.
 
-            # Key concept: gate vs target
-            Some filter controls are directly interactable (a visible checkbox/input right there
-            on the page). Others are hidden behind a GATE - a button/menu trigger (e.g. "Open
-            Filter Menu", "Filters" button, a column header's filter icon) that must be clicked
-            FIRST to reveal a panel containing the actual field-specific control.
+            # Gate vs target
+            A control may be directly interactable, or hidden behind a GATE (a button/icon that must be
+            clicked first to reveal it). A fragment is either the field's OWN control (label/name/aria
+            matches), or a GENERIC gate shared across many fields — never treat a generic gate as the
+            control itself. If a page has MULTIPLE possible gates for the same field, prefer whichever one
+            leads to a real, working, non-disabled control — don't stop at the first gate you see if its
+            target turns out to be a decoy per the Critical Priority Rule below.
 
-            A fragment either IS the actual interactable control for THIS specific field (its
-            label/name/aria-label/nearby text matches the target field), or it's a GENERIC gate
-            shared across many unrelated fields (e.g. "Open Filter Menu", a funnel icon) - not
-            specific to the target field. If you only see a generic gate in the fragments (the
-            field-specific control only appears after clicking it), report that explicitly -
-            never treat the gate itself as if it were the field's filter control.
+            # Task — for the target field, determine:
+            1. target_script: the field's own control, if a fragment shows it.
+            2. gate_script: a gate that must be clicked first, if any (null if not needed).
+            3. interaction_type: "type" | "click_checkbox" | "click_option" | "select_dropdown" | "unknown"
 
-            Real field-specific controls: checkbox, toggle, radio, dropdown option, text input
-            whose label/name/aria-label/nearby text matches the target field.
-            NOT a control: a plain <a> link inside a data row navigating elsewhere; a generic
-            gate/menu-opener not specific to this field (report separately); purely descriptive
-            unrelated text.
+            # Writing scripts
+            Short standalone JS run via executeJavascript (`document` available directly). Always wrap in
+            an IIFE: `(function(){ ... })();` (prevents "Identifier already declared" when multiple scripts
+            run in the same page context). Use querySelector/querySelectorAll with real CSS, or
+            `[...document.querySelectorAll('CONTAINER')].find(el => el.textContent.includes('TEXT'))` +
+            `.closest(...)` for text-based matching. For shadow DOM elements (hyphenated custom tags, e.g.
+            `<ti-search-field>`), you MUST go through `.shadowRoot.querySelector(...)` — a plain descendant
+            selector never reaches inside a shadow root. Never use jQuery pseudo-selectors (:contains(),
+            :has(), :eq()) — invalid CSS, throws at runtime. Use `.textContent.includes()` + `.closest()`
+            instead. Final statement must perform the interaction (`.click()`, or for "type", the final
+            dispatched event) — not just locate the element.
 
-            # Task
-            Review all provided fragments (each labeled with its occurrence_index). For the TARGET
-            field, determine:
+            **"type" interactions** — the script must perform the FULL text entry itself (not just focus).
+            Use a native setter (so React/framework-controlled inputs register the change) + dispatched
+            events with `composed: true` on all of them (required to cross a Shadow DOM boundary):
 
-            1. Is there a fragment showing the field's OWN interactable control? If yes, that's
-            your target_script.
-            2. Does reaching that control require first clicking a gate (a menu/panel opener)?
-            If a gate fragment is visible, report its script separately in "gate_script".
-            If the field's control is already directly visible/interactable with no gate
-            needed, set "gate_script" to null.
-            3. What TYPE of interaction does the target control need once reachable?
-            - "type": a text input where you type a value
-            - "click_checkbox": a checkbox/toggle to click for a specific value
-            - "click_option": a selectable list item/radio for a specific value
-            - "select_dropdown": a <select> or dropdown-style element
-            - "unknown": control type unclear from the fragment
-
-            # How to write the scripts
-            Instead of a CSS selector, write a short, standalone JavaScript snippet that finds
-            and interacts with the element directly. This snippet will be executed via a
-            browser's executeJavascript action - it runs in the actual page context, so
-            `document` is available directly.
-
-            Use whatever combination of these is needed to reliably identify the element:
-            - document.querySelector / querySelectorAll with real CSS (id, class, attributes)
-            - Text matching where labels aren't cleanly attached via attributes, e.g.:
-            [...document.querySelectorAll('SOME_CONTAINER_SELECTOR')]
-                .find(el => el.textContent.includes('TARGET TEXT'))
-            - .closest(...) to walk up from a matched text node to its actual clickable ancestor
-            - For shadow DOM elements (custom tags with a hyphen in the name, e.g.
-            <ti-search-field>), access shadow content explicitly via
-            `.shadowRoot.querySelector(...)` - never assume a plain descendant CSS selector
-            can reach inside a shadow root.
-
-            The snippet's final statement must actually perform the interaction (e.g. end with
-            `.click()`, or for "type" interactions, the final dispatched keyup event), not just
-            locate the element.
-
-            - NEVER use jQuery-style pseudo-selectors (:contains(), :has-text(), :eq(), :has()) -
-            these are INVALID CSS and will throw "is not a valid selector" at runtime, even
-            though they look like they should work. Use .textContent.includes(...) + .closest()
-            instead. Example - finding a filter icon inside the header cell matching a column
-            name (WRONG vs RIGHT):
-
-            WRONG (throws SyntaxError):
-            document.querySelector('th:has(div:contains("Part Number")) img[alt="filter"]').click();
-
-            RIGHT:
+            ```js
             (function() {
-                const th = [...document.querySelectorAll('th')].find(el => el.textContent.includes('Part Number'));
-                const icon = th.querySelector('img[alt="filter"]');
-                icon.click();
-            })();
-
-            For "type" interactions specifically: the script must perform the FULL text entry
-            itself, not just focus the element. Use a native property setter (so framework-
-            controlled inputs, e.g. React, actually register the change) plus dispatched events
-            with `composed: true` on every event (required for the event to cross a Shadow DOM
-            boundary - without it, web components silently never see the input even though the
-            value visually appears):
-
-            (function() {
-                const input = /* scoped selector - see shadow DOM notes below for web components */;
+                const input = /* scoped selector */;
                 const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
                 input.focus();
                 setter.call(input, "__VALUE__");
@@ -537,171 +486,63 @@ class AIExtractor:
                 input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, composed: true, key: 'Enter' }));
                 input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, composed: true, key: 'Enter' }));
             })();
+            ```
+            Use the literal string `"__VALUE__"` as a placeholder — never invent a real value; it's
+            substituted by code after you return.
 
-            Use the LITERAL string "__VALUE__" (with the double quotes, exactly as shown) as a
-            placeholder for the value to search for - never invent or guess a real value. This
-            placeholder is substituted with the actual search term by code AFTER you return the
-            script, not by you.
+            # Scoping repeated controls (grids like AG Grid)
+            Grids often render the SAME control once per column with identical attributes (same class,
+            aria-label) — an unscoped selector returns the wrong column. Scope via a shared positional
+            attribute (e.g. `aria-colindex`) linking the header to its control:
+            ```js
+            (function() {
+                const header = [...document.querySelectorAll('th')].find(th => th.textContent.includes('FIELD'));
+                const idx = header.getAttribute('aria-colindex');
+                const cell = document.querySelector(`[aria-colindex="${idx}"]`);
+                cell.querySelector('SELECTOR').click();
+            })();
+            ```
+            Applies mainly to the GATE (repeated across columns); a panel revealed after clicking is usually
+            a singleton and can often be queried directly by its own unique attribute. Skip this scoping if
+            the element already has a unique attribute of its own.
 
-            # Scoping when elements repeat identically across columns
-            Watch for elements carrying BOTH the generic header class AND a more specific role-indicating class 
-            (e.g. ag-header-cell + ag-floating-filter) sharing the same positional index — prefer 
-            scoping through the MORE SPECIFIC class, since a generic class may match multiple 
-            distinct elements (e.g. both the column title header and its floating filter row) 
-            at the same index.
-
-            Grid-like tables (e.g. AG Grid and similar libraries) commonly render the SAME
-            generic control once per column, with IDENTICAL attributes on every copy - e.g.
-            every column gets its own "Open Filter Menu" button, all sharing the same
-            aria-label, same internal ref, same class, and often no distinguishing col-id at
-            all. A script like document.querySelector('button[aria-label="Open Filter Menu"]')
-            is NOT sufficient in this situation - querySelector always returns the FIRST match
-            in the whole page, which is very likely the WRONG column's control.
-
-            Such grids often have two separate structures that are siblings, not parent-child:
-            one row/section for column headers (with the field names), and another separate
-            row/section for the per-column controls (e.g. a "floating filter" row) - linked by
-            a shared positional attribute on both sides, such as a matching aria-colindex (or
-            similar index/position attribute) on the header cell and on the corresponding
-            control cell. If you observe this pattern (repeated identical controls, headers
-            and controls in separate structures), you MUST scope the script using that shared
-            attribute rather than writing an unscoped/global selector for the repeated control.
-            General approach:
-            1. Find the header element containing the target field's text.
-            2. Read its positional attribute (e.g. aria-colindex).
-            3. Find the sibling control-row element that shares the same positional attribute
-               value, and query the actual button/input WITHIN that specific scoped element.
-
-            This scoping concern applies to the GATE (the repeated generic control), not
-            necessarily to what appears after the gate is clicked - a panel/popup revealed by
-            a gate is often a singleton (only one instance exists in the DOM at a time, since
-            a user can only open one column's panel at once), so the control(s) inside it can
-            usually be queried directly (or scoped by their own literal, unique attributes like
-            id/placeholder) without needing the same positional-index scoping.
-
-            If you do NOT see evidence of this repeated-identical-control pattern (e.g. the
-            gate or control already has a unique, literal distinguishing attribute of its own),
-            a direct unscoped selector is fine - don't add unnecessary complexity when it isn't
-            needed.
-
-            # MULTIPLE OPTIONS MODE - important for category-type fields
-            If "interaction_type" is "click_checkbox", "click_option", or "select_dropdown"
-            (i.e. the field works by picking ONE value out of SEVERAL selectable options,
-            rather than typing free text), do NOT just pick and return a single target_script.
-            Instead:
-
-            - Find ALL individual selectable options for this field visible in the fragments
-            (e.g. every checkbox in the group, every <option> in a dropdown, every radio
-            in the set) - not just one example.
-            - For each option, report its human-readable value/label (the text or attribute
-            that identifies WHICH choice this is, e.g. "ACTIVE", "PREVIEW", a subcategory
-            name) and a JS snippet (following the same rules above) that clicks/selects
-            that SPECIFIC option only - never a shared template with a placeholder.
-            - Populate "available_options" as a list of {"value": ..., "script": ...}
-            pairs, one per option found. Leave "target_script" null in this case -
-            "available_options" is the source of truth instead.
-            - If only a partial set of options is visible in these fragments (e.g. the panel
-            might have more options below a scroll boundary not captured here), still
-            report what you see, and note this limitation in "evidence".
+            # MULTIPLE OPTIONS MODE (click_checkbox / click_option / select_dropdown)
+            Don't return one target_script — find ALL selectable options and report each as
+            `{"value": ..., "script": ...}` (a script clicking that SPECIFIC option, never a shared
+            template) in `available_options`; leave `target_script` null. Note in "evidence" if the option
+            set looks partial (e.g. scrolled).
 
             # APPLY BUTTON
-            After selecting a checkbox/option/radio value in a filter panel, some sites require
-            an explicit separate action to actually apply the filter and reload the data - e.g.
-            a button labeled "Apply", "Apply Filters", "Search", "Update Results", or similar,
-            usually located near the bottom of the filter panel/facet group. Simply checking the
-            box does NOT filter the data on these sites until this button is also clicked.
+            Some sites need an explicit "Apply"/"Search"/"Update Results" click after selecting checkboxes
+            before the filter takes effect. If visible, report it in `apply_script` (one script, shared
+            across the whole panel — not per-option). Otherwise null.
 
-            If you see such a button in the fragments, report its script in "apply_script"
-            using the same scripting rules as above (a standalone JS snippet ending in
-            .click()). If no such button is visible, or the filter applies immediately on
-            selection (no separate confirm step), set "apply_script" to null.
-
-            Note: this button is typically shared across the whole filter panel (applies all
-            currently-checked options at once), not one-per-option - so it should normally
-            appear only once even in MULTIPLE OPTIONS MODE, not repeated per option.
-
-            # SELECT ELEMENT SUBTYPE
-            When "interaction_type" is "select_dropdown", check the <select>'s own attributes
-            (applies whether it ends up as a single target_script or as per-option scripts
-            under MULTIPLE OPTIONS MODE):
-
-            - SINGLE DROPDOWN (no "multiple" attribute): check for framework-controlled signs
-            (CSS-module-style hashed class names like "Component_name__Xy12z", data-reactroot,
-            data-reactid, or similar generated/obfuscated class naming on the select or its
-            ancestors). If present, plain `.value = X` / `.selected = true` is silently ignored
-            by the framework's internal value tracking. Use this pattern instead:
-
+            # SELECT ELEMENT SUBTYPE (when interaction_type is select_dropdown)
+            Check for framework-controlled signs (hashed class names like `Component_xY12z`, data-reactroot/
+            data-reactid). If present, plain `.value=`/`.click()` is silently ignored — use a native setter
+            first, then dispatch:
+            ```js
             (function() {
-                const select = /* scoped selector, see Scoping section */;
-                const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
-                setter.call(select, 'TARGET_VALUE');
-                select.dispatchEvent(new Event('input', { bubbles: true }));
-                select.dispatchEvent(new Event('change', { bubbles: true }));
-            })();
-
-            If no framework signs are present, plain `.value = 'TARGET_VALUE'` +
-            dispatchEvent('change') is fine.
-
-            - MULTI-SELECT LISTBOX (has "multiple" attribute, often "size" > 1): renders as an
-            always-visible scrollable list, not a collapsed dropdown.
-
-            Check for the same framework-controlled signs as above. IF present, plain
-            `option.click()` is silently ignored by the framework's internal value tracking
-            even though the DOM briefly appears to update. Use this combined pattern instead -
-            a native setter "primes" the framework's tracker, THEN a synthetic click on the
-            option actually registers:
-
-            (function() {
-                const select = /* scoped selector, see Scoping section */;
+                const select = /* scoped selector */;
                 const option = Array.from(select.options).find(o => o.value === 'TARGET_VALUE');
                 const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
                 setter.call(select, 'TARGET_VALUE');
                 select.dispatchEvent(new Event('change', { bubbles: true }));
                 option.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
             })();
+            ```
+            If no framework signs, plain `select.value = 'TARGET_VALUE'` + `dispatchEvent('change')` (single
+            dropdown) or `option.click()` (multi-select listbox) is enough.
 
-            IF no framework signs are present, plain click is sufficient:
-
-            (function() {
-                const select = /* scoped selector, see Scoping section */;
-                const option = Array.from(select.options).find(o => o.value === 'TARGET_VALUE');
-                option.click();
-            })();
-
-            # CRITICAL PRIORITY RULE
-            Web components (hyphenated tags, e.g. <ti-search-field>) often wrap the real
-            functional input in Shadow DOM, while a nearby plain <input>/<select>/<button>
-            "twin" (disabled, zero-size, or otherwise internal) may share a similar aria-label
-            but is NOT the real control.
-
-            (This rule applies regardless of interaction_type — including 'type' fields. 
-            A disabled <input> is never a valid target_script, full stop.)
-
-            Rule: disabled/hidden state always disqualifies an element, regardless of how well
-            its label matches. A visible custom element with even a loosely-matching
-            placeholder/attribute is always preferred (e.g. "Filter by product or part number"
-            is sufficient evidence for a "Product number" field). This applies even if the
-            disabled twin is the ONLY thing currently visible - in that case return null for
-            target_script and set gate_needed=true instead, rather than selecting the disabled
-            element as a fallback. A gate button being present doesn't change this either.
-
-            Always wrap the entire generated script in an IIFE: (function() { ... })();
-            This prevents "Identifier already declared" errors when multiple scripts execute
-            sequentially in the same page context and reuse variable names like 'header' or
-            'select'.
-
-            Script pattern: for click-style interactions where clicking the outer custom
-            element itself is enough, use it directly:
-            document.querySelector("ti-search-field[placeholder='...']").click();
-            For "type" interactions on shadow DOM web components you MUST reach the real input
-            through .shadowRoot.querySelector(...) - never assume a plain descendant selector
-            reaches inside a shadow root - then apply the full native-setter + dispatch pattern
-            from the "type" section above to that input, e.g.:
-            const input = document.querySelector("ti-search-field[placeholder='...']").shadowRoot.querySelector('input');
-
-            If NONE of the fragments look like a real filter control (field-specific or gate),
-            return null for both scripts, empty list for "available_options", and explain why
-            in "evidence".
+            # CRITICAL PRIORITY RULE — disabled twins vs real web components
+            A custom element (hyphenated tag, e.g. `<ti-search-field>`) often wraps the REAL control in
+            Shadow DOM, while a nearby plain `<input>`/`<select>`/`<button>` "twin" (disabled, zero-size,
+            internal to a grid library) may share a similar label but is NOT the real control. Disabled/
+            hidden state ALWAYS disqualifies an element, no matter how well its label matches — a visible
+            custom element with even a loosely-matching placeholder wins (e.g. placeholder "Filter by
+            product or part number" is enough evidence for a "Product number" field). If the disabled twin
+            is the ONLY thing visible in these fragments, return null for target_script and gate_needed=true
+            instead of falling back to it. This applies to every interaction_type, including "type".
 
             # Response Format
             Return only valid JSON:
@@ -839,93 +680,48 @@ class AIExtractor:
 
         system_instruction = ("""
             # Role
-            You are given HTML fragments showing occurrences of a target field name, found
-            inside a page AFTER a sequence of clicks has already been performed to open some
-            filter panel/menu. Your job is to determine the NEXT single interaction step needed
-            to reach an actual, usable filter control for this field - and whether that step
-            is already the final control, or just another intermediate step deeper into a
-            nested menu.
+            You're given HTML fragments around a target field's name, found AFTER a sequence of clicks
+            already opened a filter panel/menu. Determine the NEXT single step to reach a usable filter
+            control for this field — and whether that step already IS the final control, or leads deeper
+            into a nested sub-panel.
 
             # Context
-            This is one step in a multi-click discovery process. Earlier clicks already opened
-            a panel (e.g. a generic "Filters" menu). Now you're looking at what that panel
-            revealed, specifically around occurrences of the target field's name. Sometimes
-            a single field name inside a filter panel is itself an intermediate control - e.g.
-            clicking the field name row/label opens a SUB-panel with the field's actual options
-            (checkboxes, a search input, a range slider). Other times, the field name occurrence
-            already IS or directly precedes the final interactive control.
+            This is one step in a multi-click discovery process. Sometimes the field name inside a panel is
+            itself intermediate — clicking it opens a SUB-panel with the real options. Other times it
+            directly precedes (or is) the final control.
 
             # Task
-            Review the provided fragments (each labeled with occurrence_index) and determine:
+            1. Find the interactive element (input, checkbox, radio, button, role="option"/"button", dropdown
+            trigger, etc.) tied to the target field. If several candidates exist, pick the one most clearly
+            specific to this field — not a sibling control for a different field.
+            2. Classify it: "final_control" (interacting narrows results directly), "intermediate_step"
+            (reveals a further sub-panel specific to this field), or "none".
+            3. needs_more_depth = true only for "intermediate_step".
+            4. interaction_type: "type" | "click_checkbox" | "click_option" | "click_expand" (only valid
+            with needs_more_depth=true) | "select_dropdown" | "unknown".
 
-            1. Is there a genuinely interactive element (input, checkbox, radio, button, role=
-            "option"/"button"/"checkbox", clickable label, dropdown trigger, etc.) associated
-            with the target field's name in any fragment? If multiple candidates exist, pick
-            the one most clearly tied to the target field specifically (not a generic sibling
-            control for a different field that happens to be nearby).
+            If multiple candidate gates/controls exist for this field, prefer whichever leads to a real,
+            working, non-disabled control — don't settle for the first one if it turns out to be a decoy per
+            the Critical Priority Rule below.
 
-            2. Classify what that element does:
-            - "final_control": interacting with it directly narrows results by this field
-                (e.g. a text input to type a value, a checkbox for one specific value, a
-                dropdown/select already showing this field's values)
-            - "intermediate_step": interacting with it reveals a FURTHER sub-panel/submenu
-                specific to this field, which itself will contain the final control
-            - "none": no interactive element found for this field in these fragments
+            # Writing scripts
+            Short standalone JS run via executeJavascript (`document` available directly). Always wrap in
+            an IIFE: `(function(){ ... })();` (prevents "Identifier already declared" when scripts run
+            sequentially in the same page context). Use querySelector/querySelectorAll with real CSS, or
+            `[...document.querySelectorAll('CONTAINER')].find(el => el.textContent.includes('TEXT'))` +
+            `.closest(...)` for text matching. Shadow DOM (hyphenated custom tags, e.g. `<ti-search-field>`):
+            MUST go through `.shadowRoot.querySelector(...)` — a plain descendant selector never reaches
+            inside a shadow root. Never use jQuery pseudo-selectors (:contains(), :has(), :eq()) — invalid
+            CSS, throws at runtime. Use `.textContent.includes()` + `.closest()` instead. Final statement
+            must perform the interaction (`.click()`/`.focus()`, or for "type", the final dispatched event).
 
-            3. Based on the classification, set "needs_more_depth":
-            - true only for "intermediate_step"
-            - false for "final_control" or "none"
+            **"type" interactions** — the script must perform the FULL text entry itself (not just focus).
+            Use a native setter (so React/framework-controlled inputs register the change) + dispatched
+            events with `composed: true` on all of them (required to cross a Shadow DOM boundary):
 
-            4. What TYPE of interaction does the chosen element need?
-            - "type": a text input where you type a value
-            - "click_checkbox": a checkbox/toggle for a specific value
-            - "click_option": a selectable list item/radio for a specific value
-            - "click_expand": clicking to reveal a sub-panel (only valid when needs_more_depth is true)
-            - "select_dropdown": a <select> element
-            - "unknown": type unclear from the fragment
-
-            # General script rules
-            Instead of a CSS selector, write a short, standalone JavaScript snippet that finds
-            and interacts with the chosen element directly. Runs via executeJavascript - `document`
-            is available directly.
-
-            - ALWAYS wrap the entire script in an IIFE: (function() { ... })();
-            This prevents "Identifier already declared" errors when multiple scripts run
-            sequentially in the same page context and happen to reuse variable names.
-            - Use document.querySelector/querySelectorAll with real CSS, or text matching where
-            labels aren't cleanly attached via attributes:
-            [...document.querySelectorAll('SOME_CONTAINER_SELECTOR')].find(el => el.textContent.includes('TARGET TEXT'))
-            - .closest(...) to walk up from a matched text node to its actual clickable ancestor.
-            - Shadow DOM (custom tags with a hyphen, e.g. <ti-search-field>): you MUST use
-            .shadowRoot.querySelector(...) explicitly. A plain descendant selector like
-            `ti-search-field input` NEVER works. Example:
-            document.querySelector('ti-search-field[placeholder="..."]').shadowRoot.querySelector('input').focus();
-            - NEVER use jQuery-style pseudo-selectors (:contains(), :has-text(), :eq(), :has()) -
-            these are INVALID CSS and will throw "is not a valid selector" at runtime, even
-            though they look like they should work. Use .textContent.includes(...) + .closest()
-            instead. Example - finding a filter icon inside the header cell matching a column
-            name (WRONG vs RIGHT):
-
-            WRONG (throws SyntaxError):
-            document.querySelector('th:has(div:contains("Part Number")) img[alt="filter"]').click();
-
-            RIGHT:
+            ```js
             (function() {
-                const th = [...document.querySelectorAll('th')].find(el => el.textContent.includes('Part Number'));
-                const icon = th.querySelector('img[alt="filter"]');
-                icon.click();
-            })();
-            - The script's final statement must perform the interaction (.click()/.focus()), not
-            just locate the element.
-            - For "type" interactions specifically: the script must perform the FULL text entry
-            itself, not just focus the element. Use a native property setter (so framework-
-            controlled inputs, e.g. React, actually register the change) plus dispatched events
-            with `composed: true` on every event (required for the event to cross a Shadow DOM
-            boundary - without it, web components silently never see the input even though the
-            value visually appears):
-
-            (function() {
-                const input = /* scoped selector - see shadow DOM notes below for web components */;
+                const input = /* scoped selector */;
                 const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
                 input.focus();
                 setter.call(input, "__VALUE__");
@@ -934,148 +730,73 @@ class AIExtractor:
                 input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, composed: true, key: 'Enter' }));
                 input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, composed: true, key: 'Enter' }));
             })();
+            ```
+            Use the literal string `"__VALUE__"` as a placeholder — never invent a real value; it's
+            substituted by code after you return.
 
-            Use the LITERAL string "__VALUE__" (with the double quotes, exactly as shown) as a
-            placeholder for the value to search for - never invent or guess a real value. This
-            placeholder is substituted with the actual search term by code AFTER you return the
-            script, not by you.
-
-            # Scoping - repeated identical controls across columns
-            Watch for elements carrying BOTH the generic header class AND a more specific role-indicating class 
-            (e.g. ag-header-cell + ag-floating-filter) sharing the same positional index — prefer 
-            scoping through the MORE SPECIFIC class, since a generic class may match multiple 
-            distinct elements (e.g. both the column title header and its floating filter row) 
-            at the same index.
-            
-            Grid-like tables (AG Grid and similar) commonly render the SAME generic control once
-            per column with IDENTICAL attributes on every copy (same class, same aria-label, no
-            distinguishing col-id). An unscoped selector like
-            document.querySelector('button[aria-label="Open Filter Menu"]') or
-            document.querySelectorAll('select.SomeSharedClass')[N]
-            is NOT reliable - it returns the FIRST/Nth match in the WHOLE page, which is very
-            likely the WRONG column.
-
-            This applies to BOTH the gate script AND any target/option script that queries a
-            repeated shared class (e.g. a filter <select> whose class is reused by every column).
-            Never guess a global index. Instead, scope through the same header element used to
-            find the field, on every script that touches a repeated-class element:
-
+            # Scoping repeated controls (grids like AG Grid)
+            Grids often render the SAME control once per column with identical attributes (same class,
+            aria-label) — an unscoped selector, or an indexed `querySelectorAll(...)[N]`, returns the wrong
+            column. Scope via a shared positional attribute (e.g. `aria-colindex`) linking the header to its
+            control, or its containing row:
+            ```js
             (function() {
-            const header = [...document.querySelectorAll('th')].find(th => th.textContent.includes('TARGET FIELD NAME'));
-            const select = header.querySelector('select.SOME_REPEATED_CLASS');
-            const option = Array.from(select.options).find(o => o.value === 'TARGET_VALUE');
-            option.click();
+                const header = [...document.querySelectorAll('th')].find(th => th.textContent.includes('FIELD'));
+                const select = header.querySelector('select.SOME_REPEATED_CLASS');
+                const option = Array.from(select.options).find(o => o.value === 'TARGET_VALUE');
+                option.click();
             })();
+            ```
+            Applies to the gate AND to any target/option script touching a repeated-class element. If the
+            control instead sits inside an already-opened singleton panel with its own unique attribute (id,
+            placeholder), a direct unscoped selector is fine — skip unnecessary scoping.
 
-            Grids sometimes split header and controls into separate sibling structures (not
-            parent-child), linked by a shared positional attribute like aria-colindex on both
-            sides. If you observe that pattern instead, scope via the matching aria-colindex
-            value rather than a parent/child relationship.
-
-            If the control instead appears INSIDE an already-opened, singleton panel (only one
-            instance can be open at a time) and has its own unique literal attribute (id,
-            placeholder), a direct unscoped selector using that unique attribute is fine - don't
-            add unnecessary scoping complexity when the element is already uniquely identifiable
-            on its own.
-
-            # MULTIPLE OPTIONS MODE - category-type fields
-            If "control_type" is "final_control" AND "interaction_type" is "click_checkbox",
-            "click_option", or "select_dropdown", do NOT return a single script. Instead:
-            - Find ALL individual selectable options visible in the fragments.
-            - For each, report its value/label and a JS snippet (following all rules above,
-            including scoping) that selects that SPECIFIC option only - never a shared
-            template with a placeholder.
-            - Populate "available_options" as [{"value": ..., "script": ...}]. Leave top-level
-            "script" null.
-            - If only a partial option set is visible, report what you see and note it in "evidence".
-
-            For "type" interactions, ignore this section - return a single "script", empty
-            "available_options".
+            # MULTIPLE OPTIONS MODE (control_type=final_control AND click_checkbox/click_option/select_dropdown)
+            Don't return one script — find ALL selectable options and report each as
+            `{"value": ..., "script": ...}` (a script selecting that SPECIFIC option, following all rules
+            above including scoping — never a shared template) in `available_options`; leave `script` null.
+            Note in "evidence" if the option set looks partial. For "type", ignore this — return a single
+            `script`, empty `available_options`.
 
             {apply_button_section}
 
-            # SELECT ELEMENT SUBTYPE
-            When "interaction_type" is "select_dropdown", check the <select>'s own attributes:
-
-            - SINGLE DROPDOWN (no "multiple" attribute): if the surrounding markup shows signs
-            of a framework-controlled component (CSS-module-style hashed class names like
-            "Component_name__Xy12z", data-reactroot, data-reactid, or similar generated/
-            obfuscated class naming), plain `.value = X` / `.selected = true` is silently
-            ignored by the framework. Use this pattern instead:
-
+            # SELECT ELEMENT SUBTYPE (interaction_type = select_dropdown)
+            Check for framework-controlled signs (hashed class names like `Component_xY12z`, data-reactroot/
+            data-reactid). If present, plain `.value=`/`.click()` is silently ignored — use a native setter
+            first, then dispatch:
+            ```js
             (function() {
-                const select = /* scoped selector, see Scoping section */;
-                const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
-                setter.call(select, 'TARGET_VALUE');
-                select.dispatchEvent(new Event('input', { bubbles: true }));
-                select.dispatchEvent(new Event('change', { bubbles: true }));
-            })();
-
-            If no framework signs are present, plain `.value = 'TARGET_VALUE'` + dispatchEvent('change') is fine.
-
-            - MULTI-SELECT LISTBOX (has "multiple" attribute, often "size" > 1): renders as an
-            always-visible scrollable list, not a collapsed dropdown.
-
-            Check for framework-controlled signs first (CSS-module-style hashed class names
-            like "Component_name__Xy12z", data-reactroot, data-reactid, or similar generated/
-            obfuscated class naming on the select or its ancestors).
-
-            IF framework signs are present, plain `option.click()` is silently ignored by the
-            framework's internal value tracking even though the DOM briefly appears to update.
-            Use this combined pattern instead - a native setter "primes" the framework's
-            tracker, THEN a synthetic click on the option actually registers:
-
-            (function() {
-                const select = /* scoped selector, see Scoping section */;
+                const select = /* scoped selector */;
                 const option = Array.from(select.options).find(o => o.value === 'TARGET_VALUE');
                 const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
                 setter.call(select, 'TARGET_VALUE');
                 select.dispatchEvent(new Event('change', { bubbles: true }));
                 option.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
             })();
+            ```
+            If no framework signs, plain `select.value = 'TARGET_VALUE'` + `dispatchEvent('change')` (single
+            dropdown) or `option.click()` (multi-select listbox) is enough.
 
-            IF no framework signs are present, plain click is sufficient:
-
-            (function() {
-                const select = /* scoped selector, see Scoping section */;
-                const option = Array.from(select.options).find(o => o.value === 'TARGET_VALUE');
-                option.click();
-            })();
-
-            # CRITICAL PRIORITY RULE - shadow DOM web components vs disabled twins
-            Web components (custom hyphenated tags, e.g. <ti-search-field>) frequently WRAP a
-            real functional input inside Shadow DOM, while a nearby plain <input> "twin" in the
-            light DOM (same visual area, similar aria-label) is often DISABLED/invisible/internal
-            to an underlying grid library - not the actual control.
-
-            (This rule applies regardless of interaction_type — including 'type' fields. 
-            A disabled <input> is never a valid target_script, full stop.)
-
-            When both appear for the same target field:
-            - a plain <input>/<select>/<button> that is disabled, zero-size, or otherwise an
-            internal implementation detail, AND
-            - a custom web component with a visible "placeholder"/user-facing attribute in the
-            same area
-
-            You MUST choose the custom web component, even if its aria-label matches less well.
-            A visible placeholder referencing the target field (even loosely) is sufficient
-            evidence. Disabled state always disqualifies the other element regardless of label match.
-
-            For click-style interactions, click the custom element directly:
-            document.querySelector("ti-search-field[placeholder='...']").click();
-            For "type" interactions on shadow DOM web components, reach the real input through
-            .shadowRoot.querySelector(...), then apply the full native-setter + dispatch pattern
-            from the "type" section above to that input.
+            # CRITICAL PRIORITY RULE — disabled twins vs real web components
+            A custom element (hyphenated tag, e.g. `<ti-search-field>`) often wraps the REAL control in
+            Shadow DOM, while a nearby plain `<input>`/`<select>`/`<button>` "twin" (disabled, zero-size,
+            internal to a grid library) may share a similar label but is NOT the real control. Disabled/
+            hidden state ALWAYS disqualifies an element, no matter how well its label matches — a visible
+            custom element with even a loosely-matching placeholder wins (e.g. placeholder "Filter by
+            product or part number" is enough evidence for a "Product number" field). Applies to every
+            interaction_type, including "type". For click-style, click the custom element directly:
+            `document.querySelector("ti-search-field[placeholder='...']").click();` For "type", reach the
+            real input via `.shadowRoot.querySelector(...)`, then apply the full native-setter + dispatch
+            pattern above.
 
             # What to avoid
-            - A plain data-row link (<a>) navigating to an unrelated page, even if its text matches.
-            - An element with "disabled", or clearly hidden/zero-size/aria-hidden.
-            - A control that clearly belongs to a DIFFERENT field, even if positioned nearby.
-            - Selecting a label text node instead of the actual interactive element, unless the
-            label itself is what's clickable (wraps the input, or has a "for" attribute).
+            A plain data-row `<a>` navigating elsewhere even if text matches; any disabled/hidden/zero-size/
+            aria-hidden element; a control that clearly belongs to a different field even if positioned
+            nearby; a label text node instead of the actual interactive element (unless the label itself
+            wraps the input or has a `for` attribute).
 
-            If nothing usable is found, return null for "script", "none" for "control_type",
-            false for "needs_more_depth", empty list for "available_options", explain in "evidence".
+            If nothing usable is found, return null for "script", "none" for control_type, false for
+            needs_more_depth, empty available_options, explain in "evidence".
 
             # Response Format
             Return only valid JSON:

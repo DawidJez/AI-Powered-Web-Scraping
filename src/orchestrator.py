@@ -182,7 +182,7 @@ class Orchestrator:
 
         if not resolved_filters:
             raise ValueError("No valid filters resolved for scraping")
-        #print(f"DEBUG: resolved_filters = {resolved_filters}")
+        print(f"DEBUG: resolved_filters = {resolved_filters}")
         #return 0
         
         return {
