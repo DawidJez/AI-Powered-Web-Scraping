@@ -125,8 +125,14 @@ class Orchestrator:
         if html is None:
             raise ValueError("HTML content is required for filter resolution")
 
+        # the solution will work regardless of whether the user wants to download 
+        # data with or without filters.
         if not normalized_filters:
-            raise ValueError("No valid filters were provided for scraping")
+            return {
+                "filtered_data": [self.firecrawl.fetch_plain(url)],
+                "resolved_scripts": [],
+                "apply_script": None,
+            }
 
         filter_options = page_sample_result.get("filter_options", [])
         available_fields = page_sample_result.get("available_fields", [])
@@ -162,6 +168,7 @@ class Orchestrator:
             filter["search_terms"] = search_terms
 
             analisys = self.search_for_filters(html, search_terms)
+            print(f"DEBUG: analisys for filter '{name}': {analisys}")
 
             # apply_script is one global button for the whole filter panel - once any filter's
             # analysis finds it, feed it forward so later filters don't need to rediscover it
@@ -172,6 +179,19 @@ class Orchestrator:
 
             if not known_apply_script and resolved.get("apply_script"):
                 known_apply_script = resolved["apply_script"]
+
+            if not known_apply_script:
+                has_category_filter = bool(resolved.get("available_options")) or any(
+                    e["resolved"].get("available_options") for e in resolved_filters
+                )
+
+                if has_category_filter:
+                    fallback = self.extractor.find_global_apply_script(html)
+                    print(f"DEBUG: fallback global apply_script search: {fallback}")
+
+                    if fallback.get("confidence") != "none" and fallback.get("apply_script"):
+                        known_apply_script = fallback["apply_script"]
+                        resolved["apply_script"] = known_apply_script
 
             resolved_filters.append({
                 "resolved": resolved,
@@ -237,12 +257,19 @@ class Orchestrator:
             extracted = self.extractor.extract(page_data, user_prompt, available_fields)
             all_results.append(extracted.get("records", []))
 
+            # better check this hardcoded version , it may be useless with current architecture
             if "analog.com" in url and extracted.get("page_count") is None and extracted.get("records") and extracted.get("total_records_declared"):
                 extracted["page_count"] = math.ceil(extracted["total_records_declared"]/len(extracted["records"]))
                 extracted["paging_needed"] = bool(extracted["page_count"] > 1)
 
-            if extracted.get("paging_needed"):
-                page_count = extracted["page_count"]
+            has_working_pagination = bool(
+                resolved_pagination
+                and resolved_pagination.get("confidence") != "none"
+                and resolved_pagination.get("next_button_script")
+            )
+
+            if extracted.get("paging_needed") or has_working_pagination:
+                page_count = extracted.get("page_count")
                 identifier_value = page_data.get("identifier_value") if isinstance(page_data, dict) else None
                 new_html_pages = self.firecrawl.fetch_with_pagination(url, filtered_data.get("resolved_scripts"), resolved_pagination, page_count, identifier_value)
 
@@ -347,6 +374,7 @@ class Orchestrator:
             for item in filters:
                 if not isinstance(item, dict):
                     continue
+
                 normalized.append({
                     "name": item.get("name", ""),
                     "hints": list(item.get("hints") or []),
@@ -363,19 +391,20 @@ class Orchestrator:
 
         return [{"name": name, "hints": hints, "values": values}] if name else []
 
-
+    # currently unused
     def resolve_filters(self, html: str, filters: list[dict]) -> list[dict]:
         """
         Resolve each filter independently using the existing AI logic.
-        This remains compatible with the old single-filter call path.
         """
         resolved = []
         for filter_def in filters:
             name = filter_def.get("name", "").strip()
             hints = list(filter_def.get("hints") or [])
             search_terms = [name] + [h for h in hints if h]
+
             if not name:
                 continue
+
             resolved.append(self.search_for_filters(html, search_terms))
         return resolved
 

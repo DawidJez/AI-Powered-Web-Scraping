@@ -235,6 +235,8 @@ class AIExtractor:
             if attempt == max_retries:
                 print(f"Failed attempts: {max_retries} for parsing JSON")
                 return {"records": [], "filtered_page_count": None, "total_records_declared": None}
+            print(f"DEBUG: failed to parse JSON response: {response.text[:300]!r}")
+            return {"records": [], "filtered_page_count": None, "total_records_declared": None}
 
         if not isinstance(parsed, dict) or "records" not in parsed:
             print(f"DEBUG: model returned wrong format (attempt {attempt}/{max_retries}), expected dict with 'records', got: {type(parsed)}")
@@ -495,6 +497,19 @@ class AIExtractor:
             instead. Final statement must perform the interaction (`.click()`, or for "type", the final
             dispatched event) — not just locate the element.
 
+            Guard every element lookup before interacting — `const el = document.getElementById('...'); if (el) { el.click(); }`
+            — never call a method directly on a possibly-null result. A crashed action kills the ENTIRE
+            action sequence including unrelated later steps, so a silent no-op on a bad guess is far safer
+            than throwing. Applies to gate, target, and every available_options script.
+            
+            **ID selectors with special characters** — element IDs containing `:`, `.`, or other CSS-special
+            characters (common in JSF/PrimeFaces components, e.g. `id="CC02:j_id_5v_3:6:j_id_5v_u_1"`) MUST
+            use `document.getElementById('literal:id:here')` — never `document.querySelector('#literal\\:id...')`.
+            querySelector requires the CSS escape to survive as a literal backslash at runtime, but a single
+            backslash in JS source is silently dropped during string-literal parsing before it ever reaches
+            the CSS engine, producing an invalid-selector error. getElementById takes the ID as a plain string
+            with no CSS parsing, so no escaping is needed or wanted.
+
             **"type" interactions** — the script must perform the FULL text entry itself (not just focus).
             Use a native setter (so React/framework-controlled inputs register the change) + dispatched
             events with `composed: true` on all of them (required to cross a Shadow DOM boundary):
@@ -620,6 +635,84 @@ class AIExtractor:
             print(f"DEBUG: failed to parse the response: {response.text[:300]}")
             return {}
 
+    def find_global_apply_script(self, html: str, max_retries: int = 3):
+        """
+        Fallback for sites where the per-filter resolver never sees the real Apply button
+        because it lives outside that filter's HTML window (e.g. a shared modal footer).
+        """
+        html_windows = self._extract_html_windows(html, ["Apply Filters", "Apply"])
+
+        if not html_windows:
+            return {"apply_script": None, "confidence": "none", "evidence": "text not found in HTML"}
+
+        combined_windows = "\n\n".join(
+            f"--- Occurrence {w['occurrence_index']} ---\n{w['fragment']}"
+            for w in html_windows
+        )
+
+        system_instruction = ("""
+            # Role
+            Find the ONE global "Apply"/"Apply Filters"/"Update Results" button that commits ALL
+            currently-selected filters at once (usually in a modal footer or filter panel header).
+
+            # Critical distinction
+            Pages with per-category filter groups often repeat a small "Apply" link inside EACH
+            category's own panel (one per category, always the same class/text) — these are NOT
+            what we want. The real target is the single, page-level button that submits the whole
+            filter set — often has a distinguishing class/state (e.g. "enabled") or fuller text
+            (e.g. "Apply Filters" vs the repeated bare "Apply"). If several near-identical
+            "Apply" elements exist and none stands out, prefer the LAST one in document order if it
+            has a fuller/more specific text than the repeated ones — modals commonly place the real
+            submit button at the end, after all category panels.
+
+            # Writing scripts
+            Short standalone JS run via executeJavascript (`document` available directly). Wrap in
+            an IIFE. Use querySelectorAll + a distinguishing class/text match — never a positional
+            index alone if several near-identical elements exist. Guard against null:
+            `const el = ...; if (el) { el.click(); }`.
+
+            # Response Format
+            Return only valid JSON:
+            {
+            "apply_script": string or null,
+            "confidence": "high" | "low" | "none",
+            "evidence": string
+            }
+        """)
+
+        response = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=[f"HTML fragments:\n{combined_windows}"],
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json"
+                    )
+                )
+
+                metadata = response.usage_metadata
+                self.tokens_usage.append({
+                    "prompt_tokens": metadata.prompt_token_count,
+                    "output_tokens": metadata.candidates_token_count,
+                    "total_tokens": metadata.total_token_count
+                })
+                break
+
+            except errors.ServerError as e:
+                wait_time = 2 + 2 ** attempt
+                print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
+                if attempt == max_retries:
+                    return {"apply_script": None, "confidence": "none", "evidence": "attempts exhausted"}
+                time.sleep(wait_time)
+
+        try:
+            return json.loads(response.text)
+        except json.JSONDecodeError:
+            print(f"DEBUG: failed to parse the response: {response.text[:300]}")
+            return {"apply_script": None, "confidence": "none", "evidence": "JSON parse failure"}
+
     # debug func when testing filtereing and scrpping the data
     # ai returns only list of found profucts and some short analisys
     def debug_ask_ai_about_products(self, firecrawl_result: dict):
@@ -739,6 +832,19 @@ class AIExtractor:
             inside a shadow root. Never use jQuery pseudo-selectors (:contains(), :has(), :eq()) — invalid
             CSS, throws at runtime. Use `.textContent.includes()` + `.closest()` instead. Final statement
             must perform the interaction (`.click()`/`.focus()`, or for "type", the final dispatched event).
+
+            Guard every element lookup before interacting — `const el = document.getElementById('...'); if (el) { el.click(); }`
+            — never call a method directly on a possibly-null result. A crashed action kills the ENTIRE
+            action sequence including unrelated later steps, so a silent no-op on a bad guess is far safer
+            than throwing. Applies to gate, target, and every available_options script.
+
+            **ID selectors with special characters** — element IDs containing `:`, `.`, or other CSS-special
+            characters (common in JSF/PrimeFaces components, e.g. `id="CC02:j_id_5v_3:6:j_id_5v_u_1"`) MUST
+            use `document.getElementById('literal:id:here')` — never `document.querySelector('#literal\\:id...')`.
+            querySelector requires the CSS escape to survive as a literal backslash at runtime, but a single
+            backslash in JS source is silently dropped during string-literal parsing before it ever reaches
+            the CSS engine, producing an invalid-selector error. getElementById takes the ID as a plain string
+            with no CSS parsing, so no escaping is needed or wanted.
 
             **"type" interactions** — the script must perform the FULL text entry itself (not just focus).
             Use a native setter (so React/framework-controlled inputs register the change) + dispatched
@@ -902,10 +1008,11 @@ class AIExtractor:
 
     def resolve_pagination(self, page_probe: dict, html: str , url: str, max_retries: int = 3) -> dict:
   
-        pagination_search_terms = ["Next", "Next Page", "next page", 'aria-label="Next page"', "chevron-right", "pagination-next", 
-                                   "pagination_nav", "pagination__nav", "Page</span>", "Results per page", 'class="pagination"',
-                                   page_probe["pagination_evidence"]
-                                   ]
+        pagination_search_terms = [
+            "Next", "Next Page", "next page", 'aria-label="Next page"', "chevron-right", "pagination-next", 
+            "pagination_nav", "pagination__nav", "Page</span>", "Results per page", 'class="pagination"',
+            "data-page=", "per page", page_probe["pagination_evidence"]
+        ]
         
         pagination_search_terms = [term for term in pagination_search_terms if term]
         html_windows = self._extract_html_windows(html, pagination_search_terms)

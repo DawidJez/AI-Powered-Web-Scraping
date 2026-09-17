@@ -30,6 +30,13 @@ TEST6_PROMPT = """
     datasheet URL, and any other relevant technical specs shown).
 """
 
+SAMTEC_PROMPT = """
+    Extract everything from the page content about this product: CLE-123-01-G-DV-A
+"""
+
+AMPHENOL_PROMPT = """
+    Extract everything from the page content about given products from redirection links.
+"""
 
 """
 Page sample -> probe of the page and analisys of the 1. page takes 50-60s
@@ -61,14 +68,9 @@ TEST_CONFIGS = {
         "user_prompt": GENERIC_PROMPT,
         "filters": [
             {
-                "name": "Dominant Wavelength Min.",
-                "hints": ["562"],
-                "values": ["562"]
-            },
-            {
-                "name": "Dominant Wavelength Typ.",
-                "hints": ["571"],
-                "values": ["571"]
+                "name": "Part Number",
+                "hints": ["VLMK3100", "VLRYG311N2Q1"],
+                "values": ["TLMG1100", "VLMK3100", "VLRYG311N2Q1"]
             }
         ],
         "output_path": "data/excel/output_test_3.xlsx"
@@ -83,39 +85,38 @@ TEST_CONFIGS = {
     },
     "5": {
         "label": "KOA Speer",
-        "url": "https://www.koaspeer.com/products/leaded-resistors/power-leaded/bgrv-bsrv-bwrv/", # there is no products lists like tables, only pdfs, ai extractor and firecrawl client were not made to operate that 
+        "url": "https://www.koaspeer.com/parametric/",  
         "user_prompt": GENERIC_PROMPT,
-        "user_filter_choice": ["Type", "Standard Decade Values Table"],
-        "user_csv_list": ["BWRV"],
+        "filters": [
+            {
+                "name": "Resistance Range - Ohms",
+                "hints": ["Choose One", "100 - 10 k"],
+                "values": ["100 - 10 k"]
+            },
+            {
+                "name": "Minimum Power Rating - Watts",
+                "hints": ["Choose One", "0.03 - 0.1"],
+                "values": ["0.03 - 0.1"]
+            },
+            {
+                "name": "Tolerance ±%",
+                "hints": ["Choose One", "<= 0.05"],
+                "values": ["<= 0.05"]
+            }
+        ],
         "output_path": "data/excel/output_test_5.xlsx"
     },
     "6": {
         "label": "Multi-filter test (template) Samtec",
-        "url": "https://TODO.example.com/replace-with-real-page",
-        "user_prompt": GENERIC_PROMPT,
-        "filters": [
-            {
-                "name": "Category",
-                "hints": ["Connector Housings"],
-                "values": ["Connector Housings"]
-            },
-            {
-                "name": "Product name",
-                "hints": ["CMC"],
-                "values": ["CMC"]
-            },
-            {
-                "name": "Series",
-                "hints": ["64321"],
-                "values": ["64321"]
-            }
-        ],
+        "url": "https://www.samtec.com/products/cle?_gl=1*1dsoqeg*_up*MQ..*_ga*NjM0OTQ5ODc4LjE3ODk2NDA1Mjg.*_ga_3KFNZC07WW*czE3ODk2NDA1MjckbzEkZzEkdDE3ODk2NDA2NDAkajckbDAkaDE3MjE2MTYxNzg.",
+        "user_prompt": SAMTEC_PROMPT,
+        "filters": [],
         "output_path": "data/excel/output_test_6.xlsx"
     },
     "7": {
         "label": "Amphenol",
-        "url": "https://amphenol.com/products/antenna-solutions", # same problem with this site with no product tables, script in current state can't extract data like these
-        "user_prompt": GENERIC_PROMPT,
+        "url": "https://amphenol.com/products/antenna-solutions", # it can scrape the date but there is only a few data provided
+        "user_prompt": AMPHENOL_PROMPT,
         "user_filter_choice": ["Product Name", "Product Search"],
         "user_csv_list": ["5G"],
         "output_path": "data/excel/output_test_7.xlsx"

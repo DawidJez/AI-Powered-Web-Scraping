@@ -291,6 +291,8 @@ class FirecrawlClient:
         if not actions:
             raise ValueError("No filters resolved to any action")
 
+        print(f"DEBUG: actions: {actions}")
+
         result = self.app.scrape_url(
             url=url,
             formats=['markdown', 'links'],
@@ -370,8 +372,6 @@ class FirecrawlClient:
         """
         Execute a single scrape that applies multiple filters in order using
         the combined action sequence built by `_build_multi_filter_actions`.
-        Returns a dict compatible with other fetch helpers: `markdown`, `links`, `metadata`,
-        and an `item` field representing the selected_values joined by comma.
         """
         actions = self._build_multi_filter_actions(resolved_filters, selected_values)
 
@@ -380,6 +380,8 @@ class FirecrawlClient:
             actions.append({"type": "wait", "milliseconds": 1500})
         else:
             actions.append({"type": "wait", "milliseconds": 700})
+
+        print(f"DEBUG: actions: {actions}")
 
         result = self.app.scrape_url(
             url=url,
@@ -421,9 +423,10 @@ class FirecrawlClient:
             wait_for: int = 3000
         ):
         """
-        Re-applies the same filters used for the original fetch before paging - each
-        scrape_url call in Firecrawl starts from a fresh page load, so filters must be
-        reconstructed from scratch.
+        Pagination loop size is capped to stay under Firecrawl's 50-action limit; 
+        the real end of pagination is detected via
+        disabled_check_script + result.actions["javascriptReturns"], not via the
+        AI-guessed page_count.
         """
         actions = []
 
@@ -442,8 +445,29 @@ class FirecrawlClient:
         actions.extend(self._apply_action(resolved_filters))
 
         pagination_script = resolved_pagination["next_button_script"]
-        for _ in range(page_count - 1):
+        disabled_check_script = resolved_pagination.get("disabled_check_script")
+
+        MAX_ACTIONS = 50
+        SAFETY_MARGIN = 2
+
+        actions_per_cycle = 4 if disabled_check_script else 3
+        available_budget = MAX_ACTIONS - len(actions) - SAFETY_MARGIN
+        max_cycles = max(0, available_budget // actions_per_cycle)
+        max_cycles = min(max_cycles, page_count - 1) if page_count else max_cycles
+
+        js_index = sum(1 for a in actions if a["type"] == "executeJavascript")
+        disabled_js_indices = []
+
+        for _ in range(max_cycles):
+            if disabled_check_script:
+                actions.append({"type": "executeJavascript", "script": disabled_check_script})
+
+                disabled_js_indices.append(js_index)
+                js_index += 1
+
             actions.append({"type": "executeJavascript", "script": pagination_script})
+            js_index += 1
+
             actions.append({"type": "wait", "milliseconds": 1500})
             actions.append({"type": "scrape"})
 
@@ -461,4 +485,59 @@ class FirecrawlClient:
         for scrape in result.actions["scrapes"]:
             pages.append({"markdown": None, "html": scrape["html"]})
 
+        if disabled_check_script:
+            js_returns = result.actions.get("javascriptReturns") or []
+            stop_at = None
+
+            for cycle_i, ret_idx in enumerate(disabled_js_indices):
+                if ret_idx >= len(js_returns):
+                    continue
+
+                ret = js_returns[ret_idx]
+                value = None
+
+                if isinstance(ret, dict):
+                    value = ret.get("value")
+
+                    if isinstance(value, dict):
+                        value = value.get("value")
+                        
+                    value = bool(value) if value is not None else False
+                elif isinstance(ret, bool):
+                    value = ret
+
+                if value is True:
+                    stop_at = cycle_i
+                    break
+
+            print(f"DEBUG pagination: stop_at={stop_at}")
+            if stop_at is not None:
+                pages = pages[:stop_at]
+                print(f"DEBUG pagination: trimmed_pages={len(pages)}")
+
+        with open("data/debug_pagination_pages.json", "w", encoding="utf-8") as f:
+            json.dump({
+                "raw_scrapes": result.actions.get("scrapes", []),
+                "pages": pages,
+                "javascriptReturns": result.actions.get("javascriptReturns"),
+                "disabled_js_indices": disabled_js_indices,
+                "stop_at": stop_at if disabled_check_script else None,
+                "actions": actions,
+            }, f, ensure_ascii=False, indent=2)
+
         return pages
+
+    def fetch_plain(self, url: str, wait_for: int = 3000) -> dict:
+        result = self.app.scrape_url(
+            url=url,
+            formats=['markdown', 'links'],
+            wait_for=wait_for,
+            proxy="auto"
+        )
+        return {
+            "markdown": result.markdown,
+            "links": result.links,
+            "metadata": result.metadata,
+            "item": "no_filter",
+            "identifier_value": None
+        }
