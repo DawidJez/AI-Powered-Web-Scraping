@@ -1,5 +1,6 @@
 import json
 import re
+import hashlib
 from firecrawl import FirecrawlApp
 from dotenv import load_dotenv
 import os
@@ -468,7 +469,7 @@ class FirecrawlClient:
             actions.append({"type": "executeJavascript", "script": pagination_script})
             js_index += 1
 
-            actions.append({"type": "wait", "milliseconds": 1500})
+            actions.append({"type": "wait", "milliseconds": 3500})
             actions.append({"type": "scrape"})
 
         print(f"DEBUG: actions: {actions}")
@@ -481,13 +482,25 @@ class FirecrawlClient:
             proxy="auto"
         )
 
+        # Duplicate pages are dropped by content, not by the disabled flag: a site can
+        # keep its pagination buttons disabled while the grid refreshes (Molex does),
+        # so the flag is only a hint. Identical HTML means the click changed nothing.
         pages = []
-        for scrape in result.actions["scrapes"]:
+        seen_hashes = set()
+        raw_scrapes = result.actions["scrapes"]
+
+        for scrape in raw_scrapes:
+            page_hash = hashlib.md5(scrape["html"].encode("utf-8")).hexdigest()
+            if page_hash in seen_hashes:
+                continue
+            seen_hashes.add(page_hash)
             pages.append({"markdown": None, "html": scrape["html"]})
 
+        print(f"DEBUG pagination: {len(raw_scrapes)} scrapes -> {len(pages)} unique pages")
+
+        stop_at = None
         if disabled_check_script:
             js_returns = result.actions.get("javascriptReturns") or []
-            stop_at = None
 
             for cycle_i, ret_idx in enumerate(disabled_js_indices):
                 if ret_idx >= len(js_returns):
@@ -510,10 +523,8 @@ class FirecrawlClient:
                     stop_at = cycle_i
                     break
 
-            print(f"DEBUG pagination: stop_at={stop_at}")
-            if stop_at is not None:
-                pages = pages[:stop_at]
-                print(f"DEBUG pagination: trimmed_pages={len(pages)}")
+            # diagnostics only - this flag is unreliable mid-refresh, it no longer trims
+            print(f"DEBUG pagination: stop_at={stop_at} (diagnostic only, not used for trimming)")
 
         with open("data/debug_pagination_pages.json", "w", encoding="utf-8") as f:
             json.dump({

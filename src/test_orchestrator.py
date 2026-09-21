@@ -154,7 +154,7 @@ TEST_CONFIGS = {
         },
         {
             "name": "Type",
-            "hints": ["N/A"],
+            "hints": [""],
             "values": ["N/A"]
         },
         {

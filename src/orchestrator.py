@@ -279,7 +279,31 @@ class Orchestrator:
 
         return all_results
 
-    
+
+    def _dedupe_records(self, records: list[dict], key: str = "MPN") -> list[dict]:
+        """
+        Last safety net before export: drops repeated records.
+        """
+        deduped = []
+        seen = set()
+
+        for record in records:
+            if not isinstance(record, dict):
+                deduped.append(record)
+                continue
+
+            value = record.get(key)
+            signature = value if value else json.dumps(record, sort_keys=True, ensure_ascii=False)
+
+            if signature in seen:
+                continue
+
+            seen.add(signature)
+            deduped.append(record)
+
+        return deduped
+
+
     def resolve_csv(self, source: str | None = None) -> list[str]:
         """
         Turns a CSV/TXT/Excel file into a flat list of string values.
@@ -498,6 +522,7 @@ class Orchestrator:
         )
 
         flat_all_results = [record for sublist in extracted_data for record in sublist]
+        flat_all_results = self._dedupe_records(flat_all_results)
 
         if not flat_all_results:
             print("No records to save - check the filter/field/values and try again.")
@@ -574,7 +599,10 @@ class Orchestrator:
         end_extract = time.time()
 
         flat_all_results = [record for sublist in extracted_data for record in sublist]
-        print(f"flat_all_results (length): {len(flat_all_results)}\n")
+
+        before_dedupe = len(flat_all_results)
+        flat_all_results = self._dedupe_records(flat_all_results)
+        print(f"flat_all_results (length): {len(flat_all_results)} (dropped {before_dedupe - len(flat_all_results)} duplicates)\n")
 
         if not flat_all_results:
             raise ValueError("No records to save - check the filter/field/URL")
