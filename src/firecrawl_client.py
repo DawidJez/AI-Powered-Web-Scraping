@@ -13,14 +13,16 @@ class FirecrawlClient:
 
     def __init__(self, api_key: str | None = None):
         self.app = FirecrawlApp(api_key=api_key or os.getenv("FIRECRAWL_API_KEY"))
-
-    def fetch_page(self, url: str, scroll_rounds: int = 10, wait_for: int = 3000) -> dict:
+    
+    def fetch_page(self, url: str, scroll_rounds: int = 10, wait_for: int = 5000) -> dict:
 
         actions = []
 
         for _ in range(scroll_rounds):
             actions.append({"type": "scroll", "direction": "down", "amount": 2000})
             actions.append({"type": "wait", "milliseconds": 800})
+
+        actions.append({"type": "wait", "milliseconds": 3000})
             
         result = self.app.scrape_url(
             url=url,

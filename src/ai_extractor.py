@@ -18,27 +18,43 @@ class AIExtractor:
         self.client = genai.Client(api_key=api_key or os.getenv("GEMINI_API_KEY"))
         self.tokens_usage: list[dict] = []
         self.model: str = "gemini-3.1-flash-lite"
-        # DEBUG INFO: use model="gemini-3.1-flash-lite"/"gemini-2.5-flash"/"gemini-2.5-flash-lite" 
-        # after "gemini-flash-latest" is burnt out of tokens
+        # DEBUG INFO: use model: "gemini-flash-latest"/"gemini-2.5-flash"/"gemini-2.5-flash-lite" 
+        # after "gemini-3.1-flash-lite" is burnt out of tokens
 
-    def _extract_html_windows(self, html: str, search_terms: list, window_size: int = 3000, word_count: int = 3, max_windows_per_term = 20) -> list[dict]:
+    def _window_score(self, fragment: str) -> int:
+        """
+        How likely a fragment holds an actual filter control rather than just the words.
+        A generic term ("Type", "N/A") also matches table headers and body cells, and those
+        fragments are useless for resolving a filter - this is what ranks them lower.
+        """
+        score = 0
+        lowered = fragment.lower()
+
+        for marker in ['type="checkbox"', 'type="radio"', "<select", "<input", "facet", "filter"]:
+            if marker in lowered:
+                score += 1
+
+        return score
+
+    def _extract_html_windows(self, html: str, search_terms: list, window_size: int = 3000, word_count: int = 3, max_windows_per_term = 20, max_total_chars: int = 120000) -> list[dict]:
         soup = BeautifulSoup(html, "html.parser")
-        
+
         for trash_tag in soup(["script", "style"]):
             trash_tag.decompose()
-        clean_html = str(soup) 
-        
-        windows = []
+        clean_html = str(soup)
+
+        candidates = []
         for search_term in search_terms:
             short_term = " ".join(search_term.split()[:word_count])
             if not short_term:
                 continue
 
             pattern = re.compile(r'(?<![A-Za-z0-9])' + re.escape(short_term) + r'(?![A-Za-z0-9])')
-            
+
             start_idx = 0
-            term_window_count = 0
-            while len(clean_html) > start_idx and term_window_count < max_windows_per_term:
+            term_candidates = []
+            # scan wider than we keep, so the ranking below has something to choose from
+            while len(clean_html) > start_idx and len(term_candidates) < max_windows_per_term * 3:
                 m = pattern.search(clean_html, start_idx)
                 if not m:
                     break
@@ -47,13 +63,34 @@ class AIExtractor:
 
                 start = max(0, idx - window_size)
                 end = min(len(clean_html), idx + len(short_term) + window_size)
+                fragment = clean_html[start:end]
 
-                windows.append({"occurrence_index": len(windows), "fragment": clean_html[start:end]})
-                term_window_count += 1
+                term_candidates.append({
+                    "position": start,
+                    "fragment": fragment,
+                    "score": self._window_score(fragment),
+                })
 
                 start_idx = end
 
-        return windows
+            term_candidates.sort(key=lambda w: (-w["score"], w["position"]))
+            candidates.extend(term_candidates[:max_windows_per_term])
+
+        candidates.sort(key=lambda w: (-w["score"], w["position"]))
+
+        kept = []
+        total_chars = 0
+
+        for candidate in candidates:
+            if total_chars + len(candidate["fragment"]) > max_total_chars:
+                continue
+
+            kept.append(candidate)
+            total_chars += len(candidate["fragment"])
+
+        kept.sort(key=lambda w: w["position"])
+
+        return [{"occurrence_index": i, "fragment": w["fragment"]} for i, w in enumerate(kept)]
 
     def _chunk_segmentation(self, load: str, chunk_size: int, overlap: int = 2000) -> list[str]:
         chunks = []

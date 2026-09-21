@@ -139,6 +139,7 @@ class Orchestrator:
         identifier_hints = ["number", "id", "code", "part", "sku", "mpn", "name"]
 
         resolved_filters = []
+        skipped_filters = []
         known_apply_script = None
 
         for filter_def in normalized_filters:
@@ -148,22 +149,39 @@ class Orchestrator:
             if not name:
                 continue
 
-            search_terms = [name] + [h for h in hints if h]
+            # exact match before substring: a page can carry both "Type" and "Component Type"
+            # as separate filters, and substring alone silently binds the wrong one
+            matched_filter = next((f for f in filter_options if name.lower() == f["name"].lower()), None)
 
-            matched_filter = next((f for f in filter_options if name.lower() in f["name"].lower()), None)
+            if matched_filter is None:
+                matched_filter = next((f for f in filter_options if name.lower() in f["name"].lower()), None)
+
             filter = matched_filter
 
             if matched_filter is None:
-                matched_filter = next((f for f in available_fields if name.lower() in f.lower()), None)
+                matched_field = next((f for f in available_fields if name.lower() == f.lower()), None)
 
-                if matched_filter is None:
-                    raise ValueError(f"Filter '{name}' not found in detected filter_options")
+                if matched_field is None:
+                    matched_field = next((f for f in available_fields if name.lower() in f.lower()), None)
 
-                matched_filter_lc = matched_filter.lower()
-                if any(hint in matched_filter_lc for hint in identifier_hints):
-                    filter = {"name": matched_filter, "cardinality": "identifier", "example_values": None}
+                if matched_field is None:
+                    print(f"WARNING: filter '{name}' not found in detected filter_options - skipping it")
+                    skipped_filters.append({"name": name, "reason": "not found in filter_options"})
+                    continue
+
+                matched_field_lc = matched_field.lower()
+                if any(hint in matched_field_lc for hint in identifier_hints):
+                    filter = {"name": matched_field, "cardinality": "identifier", "example_values": None}
                 else:
-                    filter = {"name": matched_filter, "cardinality": "category", "example_values": None}
+                    filter = {"name": matched_field, "cardinality": "category", "example_values": None}
+
+            # search by the name that actually exists on the page, not only the user's wording -
+            # the matched name is what the label in the DOM looks like
+            search_terms = []
+            for term in [filter["name"], name] + hints:
+                term = (term or "").strip()
+                if term and term.lower() not in [t.lower() for t in search_terms]:
+                    search_terms.append(term)
 
             filter["search_terms"] = search_terms
 
@@ -175,7 +193,14 @@ class Orchestrator:
             if not analisys.get("apply_script") and known_apply_script:
                 analisys["apply_script"] = known_apply_script
 
-            resolved = self.resolve_scripts(url, analisys, filter)
+            # one filter the page doesn't expose shouldn't kill the whole run - the rest
+            # of the filters still narrow the results, and the skipped ones are reported
+            try:
+                resolved = self.resolve_scripts(url, analisys, filter)
+            except ValueError as error:
+                print(f"WARNING: skipping filter '{name}' - {error}")
+                skipped_filters.append({"name": name, "reason": str(error)})
+                continue
 
             if not known_apply_script and resolved.get("apply_script"):
                 known_apply_script = resolved["apply_script"]
@@ -201,14 +226,21 @@ class Orchestrator:
             })
 
         if not resolved_filters:
-            raise ValueError("No valid filters resolved for scraping")
+            raise ValueError(
+                f"No valid filters resolved for scraping (skipped: {[s['name'] for s in skipped_filters]})"
+            )
+
+        if skipped_filters:
+            print(f"WARNING: these filters were NOT applied: {[s['name'] for s in skipped_filters]}")
+
         print(f"DEBUG: resolved_filters = {resolved_filters}")
         #return 0
-        
+
         return {
             "filtered_data": self.firecrawl.fetch_filtered_data(url, resolved_filters),
             "resolved_scripts": resolved_filters,
             "apply_script": known_apply_script,
+            "skipped_filters": skipped_filters,
         }
 
     def resolve_pagination(self, url: str, page_sample: dict, html: str) -> dict:
@@ -564,6 +596,13 @@ class Orchestrator:
         start_sample = time.time()
         page_sample = self.page_sample(url)
         print(f"page_sample: \n{page_sample['page_sample_result']}\n")
+
+        # so we can grep the analysed HTML when a filter "isn't there" - tells apart
+        # "not in the fetched HTML" from "in the HTML but the windows missed it"
+        with open("data/shit/html_to_analize.txt", "w", encoding="utf-8") as f:
+            f.write(page_sample["html_to_analize"] or "")
+        print(f"DEBUG: html_to_analize length: {len(page_sample['html_to_analize'] or '')}\n")
+
         end_sample = time.time()
 
         start_analisys = time.time()
