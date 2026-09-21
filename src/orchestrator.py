@@ -67,6 +67,11 @@ class Orchestrator:
 
                 result = self.extractor.find_script(scripts, filter, data_to_search["html"], apply_script=analisys.get("apply_script"))
 
+                # find_script gave up (retries exhausted or unusable response) - stop digging
+                if not isinstance(result, dict):
+                    print(f"DEBUG: find_script returned no usable result for '{filter['name']}'")
+                    break
+
                 # ti has this problem with disabled inputs with "Filter Input"
                 if "www.ti.com" in url:
                     
@@ -98,14 +103,20 @@ class Orchestrator:
                     break
 
             final_script = last_result.get("script") if last_result else None
+            available_options = last_result.get("available_options") if last_result else []
+
+            # gate opened but nothing behind it - let the caller skip this filter
+            if not final_script and not available_options:
+                raise ValueError(f"DEBUG: '{filter['name']}' - gate opened but no usable control was resolved")
+
             gate_scripts = scripts[:-1] if final_script and scripts and scripts[-1] == final_script else scripts
-            return {                                                                                  
-                "gate_scripts": gate_scripts,                                                         
+            return {
+                "gate_scripts": gate_scripts,
                 "final_script": final_script,
-                "available_options": last_result.get("available_options") if last_result else [],
+                "available_options": available_options,
                 "interaction_type": last_result.get("interaction_type") if last_result else "unknown",
-                "apply_script": result.get("apply_script")
-            }                                                                                  
+                "apply_script": result.get("apply_script") if isinstance(result, dict) else None
+            }
         
         gate_scripts = [analisys["gate_script"]] if analisys.get("gate_script") else []
         return {

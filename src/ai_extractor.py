@@ -1032,6 +1032,15 @@ class AIExtractor:
 
         try:
             result = json.loads(response.text)
+
+            # the model sometimes wraps the object in a JSON array
+            if isinstance(result, list):
+                result = next((r for r in result if isinstance(r, dict)), None)
+
+            if not isinstance(result, dict):
+                print(f"DEBUG: unexpected response shape: {response.text[:300]}")
+                return None
+
             # Preserve an existing apply_script returned by the model.
             # Only inject the previously-known apply_script when the model
             # did not provide one.
