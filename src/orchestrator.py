@@ -52,7 +52,8 @@ class Orchestrator:
                 analisys["interaction_type"] = "unknown"
                 analisys["gate_needed"] = True
         
-        if analisys["gate_script"] and not analisys.get("target_script"):
+        # options already enumerated in the first pass - no reason to resolve them again
+        if analisys["gate_script"] and not analisys.get("target_script") and not analisys.get("available_options"):
             scripts = [analisys["gate_script"]]
             last_result = None # out target script
 
