@@ -79,6 +79,15 @@ VARIANTS = {
         {"type": "press", "key": "Enter"},
         {"type": "wait", "milliseconds": 3000},
     ],
+    # 2 rows = the clicks add up, 1 row = the second one replaces the first
+    f"4. native click on two options ({VALUE} + {SECOND_VALUE})": WARMUP + [
+        {"type": "click", "selector": FILTER_ICON},
+        {"type": "wait", "milliseconds": 1500},
+        {"type": "click", "selector": FILTER_OPTION},
+        {"type": "wait", "milliseconds": 3000},
+        {"type": "click", "selector": SECOND_FILTER_OPTION},
+        {"type": "wait", "milliseconds": 3000},
+    ],
 }
 
 
