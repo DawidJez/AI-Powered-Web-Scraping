@@ -585,9 +585,18 @@ class AIExtractor:
 
             # MULTIPLE OPTIONS MODE (click_checkbox / click_option / select_dropdown)
             Don't return one target_script — find ALL selectable options and report each as
-            `{"value": ..., "script": ...}` (a script clicking that SPECIFIC option, never a shared
-            template) in `available_options`; leave `target_script` null. Note in "evidence" if the option
-            set looks partial (e.g. scrolled).
+            `{"value": ..., "script": ..., "selector": ...}` (a script clicking that SPECIFIC option, never
+            a shared template) in `available_options`; leave `target_script` null. Note in "evidence" if the
+            option set looks partial (e.g. scrolled).
+
+            # NATIVE CLICK SELECTOR — fill `selector` whenever you can
+            Some frameworks ignore scripted clicks entirely and only react to a real browser click, which is
+            driven by a plain CSS selector instead of JS. So for every option also return `selector`: the CSS
+            selector of the SAME element, with no JS around it, e.g.
+            `th:nth-child(1) select.FilterOption option[value="ABC"]`. CSS cannot match text, so here a
+            positional index IS allowed when nothing else identifies the element — prefer a unique id or
+            attribute whenever one exists. Return null only when the element cannot be addressed by a
+            selector at all (it lives in Shadow DOM, or it appears only after another script runs).
 
             # APPLY BUTTON
             Some sites need an explicit "Apply"/"Search"/"Update Results" click after selecting checkboxes
@@ -628,7 +637,7 @@ class AIExtractor:
             "gate_script": string or null,
             "gate_needed": boolean,
             "target_script": string or null,
-            "available_options": [{"value": string, "script": string}, ...],
+            "available_options": [{"value": string, "script": string, "selector": string or null}, ...],
             "apply_script": string or null,
             "interaction_type": "type" | "click_checkbox" | "click_option" | "select_dropdown" | "unknown",
             "confidence": "high" | "low" | "none",
@@ -922,10 +931,19 @@ class AIExtractor:
 
             # MULTIPLE OPTIONS MODE (control_type=final_control AND click_checkbox/click_option/select_dropdown)
             Don't return one script — find ALL selectable options and report each as
-            `{"value": ..., "script": ...}` (a script selecting that SPECIFIC option, following all rules
-            above including scoping — never a shared template) in `available_options`; leave `script` null.
-            Note in "evidence" if the option set looks partial. For "type", ignore this — return a single
-            `script`, empty `available_options`.
+            `{"value": ..., "script": ..., "selector": ...}` (a script selecting that SPECIFIC option,
+            following all rules above including scoping — never a shared template) in `available_options`;
+            leave `script` null. Note in "evidence" if the option set looks partial. For "type", ignore this —
+            return a single `script`, empty `available_options`.
+
+            # NATIVE CLICK SELECTOR — fill `selector` whenever you can
+            Some frameworks ignore scripted clicks entirely and only react to a real browser click, which is
+            driven by a plain CSS selector instead of JS. So for every option also return `selector`: the CSS
+            selector of the SAME element, with no JS around it, e.g.
+            `th:nth-child(1) select.FilterOption option[value="ABC"]`. CSS cannot match text, so here a
+            positional index IS allowed when nothing else identifies the element — prefer a unique id or
+            attribute whenever one exists. Return null only when the element cannot be addressed by a
+            selector at all (it lives in Shadow DOM, or it appears only after another script runs).
 
             {apply_button_section}
 
@@ -972,7 +990,7 @@ class AIExtractor:
             {
             "chosen_occurrence_index": integer or null,
             "script": string or null,
-            "available_options": [{"value": string, "script": string}, ...],
+            "available_options": [{"value": string, "script": string, "selector": string or null}, ...],
             "control_type": "final_control" | "intermediate_step" | "none",
             "needs_more_depth": boolean,
             "interaction_type": "type" | "click_checkbox" | "click_option" | "click_expand" | "select_dropdown" | "unknown",

@@ -9,6 +9,9 @@ from itertools import product
 
 load_dotenv()
 
+# these controls allow one value at a time - needed in selecting which interaction to perform
+EXCLUSIVE_INTERACTIONS = {"click_option", "select_dropdown"}
+
 class FirecrawlClient:
 
     def __init__(self, api_key: str | None = None):
@@ -172,6 +175,16 @@ class FirecrawlClient:
         
         matched_value = match[0]
         return next(o["script"] for o in available_options if o["value"] == matched_value)
+
+    def _resolve_choosen_entry(self, available_options: list, wanted_value: str):
+        # same match, but the whole option - the selector matters, not only the script
+        values = [opt["value"] for opt in available_options]
+        match = difflib.get_close_matches(wanted_value, values, n=1, cutoff=0.4)
+
+        if not match:
+            return None
+
+        return next(o for o in available_options if o["value"] == match[0])
     
     def _category_fetch(self, url: str, scripts: list, choosen_script: str, apply_script: str = None, wait_for: int = 3000) -> dict:
         if not choosen_script:
@@ -224,12 +237,17 @@ class FirecrawlClient:
                 raise ValueError("DEBUG: category filter has no values to select")
             
             for value in selected_values:
-                chosen_script = self._resolve_choosen_option(available_options, value)
+                chosen = self._resolve_choosen_entry(available_options, value)
 
-                if not chosen_script:
+                if not chosen:
                     raise ValueError(f"DEBUG: no matching option found for '{value}'")
-                
-                actions.append({"type": "executeJavascript", "script": chosen_script})
+
+                # a real browser click - some frameworks ignore scripted ones completely
+                if chosen.get("selector"):
+                    actions.append({"type": "click", "selector": chosen["selector"]})
+                else:
+                    actions.append({"type": "executeJavascript", "script": chosen["script"]})
+
                 actions.append({"type": "wait", "milliseconds": 1500})
 
         elif final_script:
@@ -342,13 +360,38 @@ class FirecrawlClient:
 
         apply_actions = self._apply_action(category_entries + identifier_entries)
 
+        # an exclusive control drops the other options from the DOM after the first real click,
+        # so its values can't share one sequence - each needs its own fetch
+        exclusive_entries = [
+            entry for entry in category_entries
+            
+            if entry["resolved"].get("interaction_type") in EXCLUSIVE_INTERACTIONS
+            and len(entry.get("values") or []) > 1
+        ]
+
+        if len(exclusive_entries) > 1:
+            raise NotImplementedError("More than one multi-value exclusive category filter is not supported yet")
+
+        exclusive_entry = exclusive_entries[0] if exclusive_entries else None
+
         category_actions = []
         for entry in category_entries:
             values = entry.get("values") or []
 
-            if not values:
+            if not values or entry is exclusive_entry:
                 continue
             category_actions.extend(self._build_actions_for_filter(entry["resolved"], values))
+
+        if exclusive_entry:
+            if identifier_entries:
+                raise NotImplementedError("An exclusive category filter combined with an identifier filter is not supported yet")
+
+            results = []
+            for value in exclusive_entry.get("values") or []:
+                extra = self._build_actions_for_filter(exclusive_entry["resolved"], [value])
+                results.append(self._run_fetch(url, category_actions, extra, apply_actions, self._label_for(category_entries, value), value))
+
+            return results
 
         if not identifier_entries:
             return [self._run_fetch(url, category_actions, [], apply_actions, self._label_for(category_entries, None), None)]
