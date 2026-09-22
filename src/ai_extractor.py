@@ -479,9 +479,13 @@ class AIExtractor:
                 wait_time = 2 + 2 ** attempt
 
                 print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
+                # nothing downstream works without the page probe, so stop here instead of
+                # letting an empty result surface later as a filter problem
                 if attempt == max_retries:
-                    print("DEBUG: The number of attempts has been exhausted; an empty response is returned.")
-                    return {}
+                    raise RuntimeError(
+                        f"The AI model is unavailable right now, so the page could not be analysed "
+                        f"after {max_retries} attempts. Please try again in a few minutes. Reason: {e}"
+                    )
                 
                 time.sleep(wait_time)
 

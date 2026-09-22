@@ -510,7 +510,12 @@ class Orchestrator:
         url = input("Enter the page URL: ").strip()
 
         print("\nAnalyzing the page, one moment...")
-        page_sample = self.page_sample(url)
+        try:
+            page_sample = self.page_sample(url)
+        except RuntimeError as error:
+            print(f"\n{error}\n")
+            return
+
         self._print_sample(page_sample["page_sample_result"])
 
         try:
@@ -629,7 +634,12 @@ class Orchestrator:
         print("DEBUG: Start of the test")
 
         start_sample = time.time()
-        page_sample = self.page_sample(url)
+        try:
+            page_sample = self.page_sample(url)
+        except RuntimeError as error:
+            print(f"\n{error}\n")
+            return
+
         print(f"page_sample: \n{page_sample['page_sample_result']}\n")
 
         # so we can grep the analysed HTML when a filter "isn't there" - tells apart
