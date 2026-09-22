@@ -416,7 +416,11 @@ class FirecrawlClient:
                     continue
 
                 label = self._label_for(category_entries, value)
-                results.append(self._run_fetch(url, category_actions, extra + identifier_extra, apply_actions, label, identifier_value or value))
+                fetched = self._run_fetch(url, category_actions, extra + identifier_extra, apply_actions, label, identifier_value)
+
+                # pagination has to rebuild the filters, and it needs to know which value this page used
+                fetched["exclusive_value"] = value
+                results.append(fetched)
 
             if not results:
                 raise ValueError(f"DEBUG: no value of '{exclusive_entry.get('name')}' matched an available option")
@@ -496,6 +500,7 @@ class FirecrawlClient:
             resolved_pagination: dict,
             page_count: int,
             identifier_value: str | None,
+            exclusive_value: str | None = None,
             wait_for: int = 3000
         ):
         """
@@ -513,6 +518,11 @@ class FirecrawlClient:
             values = entry.get("values") or []
             if not values:
                 continue
+
+            # this page came from one value of an exclusive filter - rebuild that one, not all
+            if exclusive_value and entry["resolved"].get("interaction_type") in EXCLUSIVE_INTERACTIONS and exclusive_value in values:
+                values = [exclusive_value]
+
             actions.extend(self._build_actions_for_filter(entry["resolved"], values))
 
         if identifier_entries and identifier_value:

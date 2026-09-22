@@ -92,6 +92,24 @@ class AIExtractor:
 
         return [{"occurrence_index": i, "fragment": w["fragment"]} for i, w in enumerate(kept)]
 
+    def _json_object(self, response_text: str, fallback=None):
+        """One shape for every model reply: a dict, or the fallback when it isn't one."""
+        try:
+            parsed = json.loads(response_text)
+        except json.JSONDecodeError:
+            print(f"DEBUG: failed to parse the response: {response_text[:300]}")
+            return fallback
+
+        # the model sometimes wraps the object in a JSON array
+        if isinstance(parsed, list):
+            parsed = next((p for p in parsed if isinstance(p, dict)), None)
+
+        if not isinstance(parsed, dict):
+            print(f"DEBUG: unexpected response shape: {response_text[:300]}")
+            return fallback
+
+        return parsed
+
     def _chunk_segmentation(self, load: str, chunk_size: int, overlap: int = 2000) -> list[str]:
         chunks = []
         start = 0
@@ -467,11 +485,7 @@ class AIExtractor:
                 
                 time.sleep(wait_time)
 
-        try:
-            return json.loads(response.text)
-        except json.JSONDecodeError:
-            print(f"DEBUG: failed to parse the response: {response.text[:300]}")
-            return {}
+        return self._json_object(response.text, {})
         
 
     def analize_html(self, html: str, search_terms: list, max_retries: int = 3):
@@ -675,11 +689,7 @@ class AIExtractor:
                 
                 time.sleep(wait_time)
 
-        try:
-            return json.loads(response.text)
-        except json.JSONDecodeError:
-            print(f"DEBUG: failed to parse the response: {response.text[:300]}")
-            return {}
+        return self._json_object(response.text, {})
 
     def find_global_apply_script(self, html: str, max_retries: int = 3):
         """
@@ -753,11 +763,7 @@ class AIExtractor:
                     return {"apply_script": None, "confidence": "none", "evidence": "attempts exhausted"}
                 time.sleep(wait_time)
 
-        try:
-            return json.loads(response.text)
-        except json.JSONDecodeError:
-            print(f"DEBUG: failed to parse the response: {response.text[:300]}")
-            return {"apply_script": None, "confidence": "none", "evidence": "JSON parse failure"}
+        return self._json_object(response.text, {"apply_script": None, "confidence": "none", "evidence": "JSON parse failure"})
 
     # debug func when testing filtereing and scrpping the data
     # ai returns only list of found profucts and some short analisys
@@ -1048,27 +1054,18 @@ class AIExtractor:
                     continue
                 raise
 
-        try:
-            result = json.loads(response.text)
+        result = self._json_object(response.text)
 
-            # the model sometimes wraps the object in a JSON array
-            if isinstance(result, list):
-                result = next((r for r in result if isinstance(r, dict)), None)
-
-            if not isinstance(result, dict):
-                print(f"DEBUG: unexpected response shape: {response.text[:300]}")
-                return None
-
-            # Preserve an existing apply_script returned by the model.
-            # Only inject the previously-known apply_script when the model
-            # did not provide one.
-            if (not result.get("apply_script")) and apply_script:
-                result["apply_script"] = apply_script
-            return result
-        
-        except json.JSONDecodeError:
-            print(f"DEBUG: failed to parse the response: {response.text[:300]}")
+        if result is None:
             return None
+
+        # Preserve an existing apply_script returned by the model.
+        # Only inject the previously-known apply_script when the model
+        # did not provide one.
+        if (not result.get("apply_script")) and apply_script:
+            result["apply_script"] = apply_script
+
+        return result
 
     def resolve_pagination(self, page_probe: dict, html: str , url: str, max_retries: int = 3) -> dict:
   
@@ -1223,8 +1220,4 @@ class AIExtractor:
                     continue
                 raise
 
-        try:
-            return json.loads(response.text)
-        except json.JSONDecodeError:
-            print(f"DEBUG: failed to parse the response: {response.text[:300]}")
-            return None
+        return self._json_object(response.text)

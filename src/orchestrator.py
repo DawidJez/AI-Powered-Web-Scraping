@@ -199,6 +199,12 @@ class Orchestrator:
             analisys = self.search_for_filters(html, search_terms)
             print(f"DEBUG: analisys for filter '{name}': {analisys}")
 
+            # unusable analysis (empty or wrong shape) - skip instead of crashing downstream
+            if not isinstance(analisys, dict) or not analisys:
+                print(f"WARNING: skipping filter '{name}' - the analysis came back empty")
+                skipped_filters.append({"name": name, "reason": "empty analysis"})
+                continue
+
             # apply_script is one global button for the whole filter panel - once any filter's
             # analysis finds it, feed it forward so later filters don't need to rediscover it
             if not analisys.get("apply_script") and known_apply_script:
@@ -314,7 +320,8 @@ class Orchestrator:
             if extracted.get("paging_needed") or has_working_pagination:
                 page_count = extracted.get("page_count")
                 identifier_value = page_data.get("identifier_value") if isinstance(page_data, dict) else None
-                new_html_pages = self.firecrawl.fetch_with_pagination(url, filtered_data.get("resolved_scripts"), resolved_pagination, page_count, identifier_value)
+                exclusive_value = page_data.get("exclusive_value") if isinstance(page_data, dict) else None
+                new_html_pages = self.firecrawl.fetch_with_pagination(url, filtered_data.get("resolved_scripts"), resolved_pagination, page_count, identifier_value, exclusive_value)
 
                 for page_html in new_html_pages:
                     extracted_more = self.extractor.extract(page_html, user_prompt, available_fields)
