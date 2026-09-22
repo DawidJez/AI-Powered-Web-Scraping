@@ -176,15 +176,17 @@ class FirecrawlClient:
         matched_value = match[0]
         return next(o["script"] for o in available_options if o["value"] == matched_value)
 
-    def _resolve_choosen_entry(self, available_options: list, wanted_value: str):
+    def _resolve_choosen_entry(self, available_options: list, wanted_value: str, cutoff: float = 0.85):
         # same match, but the whole option - the selector matters, not only the script
-        values = [opt["value"] for opt in available_options]
-        match = difflib.get_close_matches(wanted_value, values, n=1, cutoff=0.4)
+        # cutoff stays high on purpose: at 0.4 "TLMG1100" matched "VLMK3100" (ratio 0.62),
+        # and matching lowercased keeps a high cutoff from failing on case alone
+        lowered = {opt["value"].lower(): opt for opt in available_options}
+        match = difflib.get_close_matches(wanted_value.lower(), list(lowered), n=1, cutoff=cutoff)
 
         if not match:
             return None
 
-        return next(o for o in available_options if o["value"] == match[0])
+        return lowered[match[0]]
     
     def _category_fetch(self, url: str, scripts: list, choosen_script: str, apply_script: str = None, wait_for: int = 3000) -> dict:
         if not choosen_script:
@@ -236,11 +238,15 @@ class FirecrawlClient:
             if not selected_values:
                 raise ValueError("DEBUG: category filter has no values to select")
             
+            matched_any = False
+
             for value in selected_values:
                 chosen = self._resolve_choosen_entry(available_options, value)
 
+                # skipping beats filtering by a wrong value the user never asked for
                 if not chosen:
-                    raise ValueError(f"DEBUG: no matching option found for '{value}'")
+                    print(f"WARNING: no option matching '{value}' - this value will not be applied")
+                    continue
 
                 # a real browser click - some frameworks ignore scripted ones completely
                 if chosen.get("selector"):
@@ -249,6 +255,10 @@ class FirecrawlClient:
                     actions.append({"type": "executeJavascript", "script": chosen["script"]})
 
                 actions.append({"type": "wait", "milliseconds": 1500})
+                matched_any = True
+
+            if not matched_any:
+                raise ValueError(f"DEBUG: none of the values {selected_values} matched an available option")
 
         elif final_script:
             if not selected_values:
@@ -383,13 +393,33 @@ class FirecrawlClient:
             category_actions.extend(self._build_actions_for_filter(entry["resolved"], values))
 
         if exclusive_entry:
+            # one identifier value is just a constant extra action, N of them would be a product
+            if identifier_entries and len(identifier_entries[0].get("values") or []) > 1:
+                raise NotImplementedError("An exclusive category filter combined with a multi-value identifier filter is not supported yet")
+
+            identifier_extra = []
+            identifier_value = None
+
             if identifier_entries:
-                raise NotImplementedError("An exclusive category filter combined with an identifier filter is not supported yet")
+                identifier_values = identifier_entries[0].get("values") or []
+
+                if identifier_values:
+                    identifier_value = identifier_values[0]
+                    identifier_extra = self._build_actions_for_filter(identifier_entries[0]["resolved"], [identifier_value])
 
             results = []
             for value in exclusive_entry.get("values") or []:
-                extra = self._build_actions_for_filter(exclusive_entry["resolved"], [value])
-                results.append(self._run_fetch(url, category_actions, extra, apply_actions, self._label_for(category_entries, value), value))
+                try:
+                    extra = self._build_actions_for_filter(exclusive_entry["resolved"], [value])
+                except ValueError as error:
+                    print(f"WARNING: skipping value '{value}' - {error}")
+                    continue
+
+                label = self._label_for(category_entries, value)
+                results.append(self._run_fetch(url, category_actions, extra + identifier_extra, apply_actions, label, identifier_value or value))
+
+            if not results:
+                raise ValueError(f"DEBUG: no value of '{exclusive_entry.get('name')}' matched an available option")
 
             return results
 
