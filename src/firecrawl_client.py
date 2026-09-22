@@ -1,6 +1,7 @@
 import json
 import re
 import hashlib
+import soupsieve
 from firecrawl import FirecrawlApp
 from dotenv import load_dotenv
 import os
@@ -176,6 +177,24 @@ class FirecrawlClient:
         matched_value = match[0]
         return next(o["script"] for o in available_options if o["value"] == matched_value)
 
+    def _usable_selector(self, selector: str | None) -> bool:
+        """A native click needs plain CSS - engine extensions never reach the browser."""
+        if not selector:
+            return False
+
+        lowered = selector.lower()
+
+        # playwright/jquery text matchers look like CSS but no browser parses them
+        if any(bad in lowered for bad in (":has-text", ":contains", ":-soup-contains", ":visible", ">>", "xpath=")):
+            return False
+
+        try:
+            soupsieve.compile(selector)
+        except Exception:
+            return False
+
+        return True
+
     def _resolve_choosen_entry(self, available_options: list, wanted_value: str, cutoff: float = 0.85):
         # same match, but the whole option - the selector matters, not only the script
         # cutoff stays high on purpose: at 0.4 "TLMG1100" matched "VLMK3100" (ratio 0.62),
@@ -249,9 +268,12 @@ class FirecrawlClient:
                     continue
 
                 # a real browser click - some frameworks ignore scripted ones completely
-                if chosen.get("selector"):
+                if self._usable_selector(chosen.get("selector")):
                     actions.append({"type": "click", "selector": chosen["selector"]})
                 else:
+                    if chosen.get("selector"):
+                        print(f"WARNING: unusable selector for '{value}', falling back to the script: {chosen['selector']}")
+
                     actions.append({"type": "executeJavascript", "script": chosen["script"]})
 
                 actions.append({"type": "wait", "milliseconds": 1500})

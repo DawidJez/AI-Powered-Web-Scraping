@@ -186,11 +186,12 @@ class Orchestrator:
                 else:
                     filter = {"name": matched_field, "cardinality": "category", "example_values": None}
 
-            # search by the name that actually exists on the page, not only the user's wording -
-            # the matched name is what the label in the DOM looks like
+            # the name that actually exists on the page, plus every value distinctive enough
+            # to pin down its own option
             search_terms = []
-            for term in [filter["name"], name] + hints:
+            for term in [filter["name"], name] + hints + [v for v in values if self._is_distinctive_value(v)]:
                 term = (term or "").strip()
+                
                 if term and term.lower() not in [t.lower() for t in search_terms]:
                     search_terms.append(term)
 
@@ -329,6 +330,22 @@ class Orchestrator:
 
         return all_results
 
+
+    def _is_distinctive_value(self, value: str) -> bool:
+        """
+        Worth searching the HTML for: "TLMG1100" pins down its own option, while "6" or
+        "3.0A" matches half the page and would crowd out the windows that matter.
+        """
+        value = (value or "").strip()
+
+        if len(value) < 4:
+            return False
+
+        # a number with an optional short unit is not distinctive, however long it is
+        if re.fullmatch(r"[\d\s.,%/+\-–—<>=]+[a-zA-Z\"'°µΩ]{0,3}", value):
+            return False
+
+        return True
 
     def _dedupe_records(self, records: list[dict], key: str = "MPN") -> list[dict]:
         """

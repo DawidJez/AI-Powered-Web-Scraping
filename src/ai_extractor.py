@@ -609,8 +609,10 @@ class AIExtractor:
             selector of the SAME element, with no JS around it, e.g.
             `th:nth-child(1) select.FilterOption option[value="ABC"]`. CSS cannot match text, so here a
             positional index IS allowed when nothing else identifies the element — prefer a unique id or
-            attribute whenever one exists. Return null only when the element cannot be addressed by a
-            selector at all (it lives in Shadow DOM, or it appears only after another script runs).
+            attribute whenever one exists. It must be plain CSS that `document.querySelector` accepts:
+            never `:has-text(...)`, `:contains(...)`, `:visible`, `>>` or XPath — those are testing-tool
+            extensions and no browser parses them. Return null only when the element cannot be addressed
+            by a selector at all (it lives in Shadow DOM, or it appears only after another script runs).
 
             # APPLY BUTTON
             Some sites need an explicit "Apply"/"Search"/"Update Results" click after selecting checkboxes
@@ -948,8 +950,10 @@ class AIExtractor:
             selector of the SAME element, with no JS around it, e.g.
             `th:nth-child(1) select.FilterOption option[value="ABC"]`. CSS cannot match text, so here a
             positional index IS allowed when nothing else identifies the element — prefer a unique id or
-            attribute whenever one exists. Return null only when the element cannot be addressed by a
-            selector at all (it lives in Shadow DOM, or it appears only after another script runs).
+            attribute whenever one exists. It must be plain CSS that `document.querySelector` accepts:
+            never `:has-text(...)`, `:contains(...)`, `:visible`, `>>` or XPath — those are testing-tool
+            extensions and no browser parses them. Return null only when the element cannot be addressed
+            by a selector at all (it lives in Shadow DOM, or it appears only after another script runs).
 
             {apply_button_section}
 
