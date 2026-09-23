@@ -189,6 +189,46 @@ class FirecrawlClient:
         """The model knows the native-setter pattern but skips it half the time - rewrite it either way."""
         return self.VALUE_ASSIGNMENT.sub(self.NATIVE_SETTER, script)
 
+    APPLY_SELECTOR = re.compile(r"querySelector\(\s*['\"]([^'\"]+)['\"]\s*\)")
+
+    def _scoped_apply_script(self, script: str) -> str:
+        """
+        Apply buttons come in twins - one inside every filter panel plus a page-level one, and the
+        model's selector hits whichever comes first. The page-level one is the button whose nearest
+        checkbox-bearing ancestor holds the most of them, so pick that one at runtime.
+        """
+        match = self.APPLY_SELECTOR.search(script or "")
+
+        if not match:
+            return script
+
+        selector = json.dumps(match.group(1))
+
+        return (
+            "(function() { const all = [...document.querySelectorAll(" + selector + ")]; "
+            "if (!all.length) { return 'no apply control found'; } "
+            "const reach = (el) => { let node = el.parentElement; "
+            "while (node) { const found = node.querySelectorAll('input[type=checkbox], [role=\"checkbox\"]').length; "
+            "if (found) { return found; } node = node.parentElement; } return 0; }; "
+            "const ranked = all.map(el => ({ el: el, visible: el.offsetParent !== null ? 1 : 0, reach: reach(el) })); "
+            "ranked.sort((a, b) => b.visible - a.visible || b.reach - a.reach); "
+            "ranked[0].el.click(); "
+            "return 'apply clicked, candidates=' + all.length + ', reach=' + ranked[0].reach; })();"
+        )
+
+    def _report_script_errors(self, result) -> None:
+        """A guarded script that blew up answers with its message instead of crashing - say so."""
+        returns = (getattr(result, "actions", None) or {}).get("javascriptReturns") or []
+
+        for entry in returns:
+            value = entry
+
+            while isinstance(value, dict):
+                value = value.get("value")
+
+            if isinstance(value, str) and value.startswith("script error"):
+                print(f"WARNING: {value}")
+
     def _safe_script(self, script: str) -> str:
         """One crashing executeJavascript kills the whole action sequence, so a bad selector becomes a no-op instead."""
         script = self._use_native_setter(script)
@@ -302,12 +342,8 @@ class FirecrawlClient:
                     print(f"WARNING: no option matching '{value}' - this value will not be applied")
                     continue
 
-                # a checkbox flips from a scripted .click() just fine, and the model's script aims at the
-                # label - the input behind it is often styled away and not clickable at all
-                native_click = resolved.get("interaction_type") != "click_checkbox"
-
                 # a real browser click - some frameworks ignore scripted ones completely
-                if native_click and self._usable_selector(chosen.get("selector")):
+                if self._usable_selector(chosen.get("selector")):
                     actions.append({"type": "click", "selector": chosen["selector"]})
                 else:
                     if chosen.get("selector"):
@@ -340,7 +376,7 @@ class FirecrawlClient:
 
         if apply_script:
             return [
-                {"type": "executeJavascript", "script": self._safe_script(apply_script)},
+                {"type": "executeJavascript", "script": self._safe_script(self._scoped_apply_script(apply_script))},
                 {"type": "wait", "milliseconds": 1500}
             ]
         return [{"type": "wait", "milliseconds": 700}]
@@ -392,6 +428,8 @@ class FirecrawlClient:
             actions=actions,
             proxy="auto"
         )
+
+        self._report_script_errors(result)
         return {
             "markdown": result.markdown,
             "links": result.links,
@@ -517,7 +555,7 @@ class FirecrawlClient:
         actions = self._build_multi_filter_actions(resolved_filters, selected_values)
 
         if apply_script:
-            actions.append({"type": "executeJavascript", "script": self._safe_script(apply_script)})
+            actions.append({"type": "executeJavascript", "script": self._safe_script(self._scoped_apply_script(apply_script))})
             actions.append({"type": "wait", "milliseconds": 1500})
         else:
             actions.append({"type": "wait", "milliseconds": 700})
@@ -531,6 +569,8 @@ class FirecrawlClient:
             actions=actions,
             proxy="auto"
         )
+
+        self._report_script_errors(result)
 
         separator = ", "
         joined = separator.join(selected_values)
@@ -556,6 +596,8 @@ class FirecrawlClient:
             actions=actions,
             proxy="auto"
         )
+
+        self._report_script_errors(result)
 
         return {"html": result.html}    
     
@@ -637,6 +679,8 @@ class FirecrawlClient:
             actions=actions,
             proxy="auto"
         )
+
+        self._report_script_errors(result)
 
         # Duplicate pages are dropped by content, not by the disabled flag: a site can
         # keep its pagination buttons disabled while the grid refreshes (Molex does),
