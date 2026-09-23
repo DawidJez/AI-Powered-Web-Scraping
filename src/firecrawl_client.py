@@ -177,8 +177,22 @@ class FirecrawlClient:
         matched_value = match[0]
         return next(o["script"] for o in available_options if o["value"] == matched_value)
 
+    # a plain `el.value = x` is swallowed by React/Vue controlled inputs - the native setter is not
+    VALUE_ASSIGNMENT = re.compile(r"([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.value\s*=(?!=)\s*([^;]+);")
+    NATIVE_SETTER = (
+        "(function(el, v) { const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype "
+        ": (el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype); "
+        "Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, v); })(\\1, \\2);"
+    )
+
+    def _use_native_setter(self, script: str) -> str:
+        """The model knows the native-setter pattern but skips it half the time - rewrite it either way."""
+        return self.VALUE_ASSIGNMENT.sub(self.NATIVE_SETTER, script)
+
     def _safe_script(self, script: str) -> str:
         """One crashing executeJavascript kills the whole action sequence, so a bad selector becomes a no-op instead."""
+        script = self._use_native_setter(script)
+
         return "(function() { try { " + script + " } catch (e) { return 'script error: ' + e.message; } })();"
 
     def _safe_value_script(self, script: str) -> str:
