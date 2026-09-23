@@ -621,7 +621,11 @@ class AIExtractor:
             positional index IS allowed when nothing else identifies the element — prefer a unique id or
             attribute whenever one exists. It must be plain CSS that `document.querySelector` accepts:
             never `:has-text(...)`, `:contains(...)`, `:visible`, `>>` or XPath — those are testing-tool
-            extensions and no browser parses them. Return null only when the element cannot be addressed
+            extensions and no browser parses them. CSS cannot match text at all, so when the element has
+            to be scoped to one column or row, scope it by an attribute that identifies that column in
+            the fragment — `aria-colindex`, `col-id`, `data-field`, `data-colindex` — or by position, e.g.
+            `[aria-colindex="3"] button[ref="eButtonShowMainFilter"]`. Read the actual value out of the
+            HTML you were given; never approximate the scope with a text-matching pseudo-class. Return null only when the element cannot be addressed
             by a selector at all (it lives in Shadow DOM, or it appears only after another script runs).
 
             The GATE needs one too, as `gate_selector`: menus built by grid/framework components often
@@ -967,7 +971,11 @@ class AIExtractor:
             positional index IS allowed when nothing else identifies the element — prefer a unique id or
             attribute whenever one exists. It must be plain CSS that `document.querySelector` accepts:
             never `:has-text(...)`, `:contains(...)`, `:visible`, `>>` or XPath — those are testing-tool
-            extensions and no browser parses them. Return null only when the element cannot be addressed
+            extensions and no browser parses them. CSS cannot match text at all, so when the element has
+            to be scoped to one column or row, scope it by an attribute that identifies that column in
+            the fragment — `aria-colindex`, `col-id`, `data-field`, `data-colindex` — or by position, e.g.
+            `[aria-colindex="3"] button[ref="eButtonShowMainFilter"]`. Read the actual value out of the
+            HTML you were given; never approximate the scope with a text-matching pseudo-class. Return null only when the element cannot be addressed
             by a selector at all (it lives in Shadow DOM, or it appears only after another script runs).
             For a single control (interaction_type "type") return its `selector` the same way,
             next to `script` - it is checked against the page before the script is trusted.
