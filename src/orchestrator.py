@@ -75,6 +75,7 @@ class Orchestrator:
         # options already enumerated in the first pass - no reason to resolve them again
         if analisys["gate_script"] and not analisys.get("target_script") and not analisys.get("available_options"):
             scripts = [analisys["gate_script"]]
+            selectors = [analisys.get("gate_selector")]
             last_result = None # out target script
 
             for _ in range(1,max_depth):
@@ -126,6 +127,7 @@ class Orchestrator:
                         break
 
                     scripts.append(result["script"])
+                    selectors.append(result.get("selector"))
 
                 if not result.get("needs_more_depth", False):
                     break
@@ -137,9 +139,13 @@ class Orchestrator:
             if not final_script and not available_options:
                 raise ValueError(f"DEBUG: '{filter['name']}' - gate opened but no usable control was resolved")
 
-            gate_scripts = scripts[:-1] if final_script and scripts and scripts[-1] == final_script else scripts
+            dropped_last = bool(final_script and scripts and scripts[-1] == final_script)
+            gate_scripts = scripts[:-1] if dropped_last else scripts
+            gate_selectors = selectors[:-1] if dropped_last else selectors
+
             return {
                 "gate_scripts": gate_scripts,
+                "gate_selectors": gate_selectors,
                 "final_script": final_script,
                 "available_options": available_options,
                 "interaction_type": last_result.get("interaction_type") if last_result else "unknown",
@@ -147,8 +153,11 @@ class Orchestrator:
             }
         
         gate_scripts = [analisys["gate_script"]] if analisys.get("gate_script") else []
+        gate_selectors = [analisys.get("gate_selector")] if analisys.get("gate_script") else []
+
         return {
             "gate_scripts": gate_scripts,
+            "gate_selectors": gate_selectors,
             "final_script": analisys.get("target_script"),
             "available_options": analisys.get("available_options"),
             "interaction_type": analisys.get("interaction_type"),

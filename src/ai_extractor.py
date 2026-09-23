@@ -624,6 +624,10 @@ class AIExtractor:
             extensions and no browser parses them. Return null only when the element cannot be addressed
             by a selector at all (it lives in Shadow DOM, or it appears only after another script runs).
 
+            The GATE needs one too, as `gate_selector`: menus built by grid/framework components often
+            ignore a scripted click and open only on a real one, so the gate is clicked by selector
+            whenever you provide it.
+
             # APPLY BUTTON
             Some sites need an explicit "Apply"/"Search"/"Update Results" click after selecting checkboxes
             before the filter takes effect. If visible, report it in `apply_script` (one script, shared
@@ -661,6 +665,7 @@ class AIExtractor:
             {
             "chosen_occurrence_index": integer or null,
             "gate_script": string or null,
+            "gate_selector": string or null,
             "gate_needed": boolean,
             "target_script": string or null,
             "available_options": [{"value": string, "script": string, "selector": string or null}, ...],

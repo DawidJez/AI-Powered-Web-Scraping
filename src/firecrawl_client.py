@@ -249,8 +249,17 @@ class FirecrawlClient:
         final_script = resolved.get("final_script")
         available_options = resolved.get("available_options") or []
 
-        for s in gate_scripts:
-            actions.append({"type": "executeJavascript", "script": s})
+        gate_selectors = resolved.get("gate_selectors") or []
+
+        for index, gate_script in enumerate(gate_scripts):
+            gate_selector = gate_selectors[index] if index < len(gate_selectors) else None
+
+            # menus built by grid components often ignore a scripted click and open only on a real one
+            if self._usable_selector(gate_selector):
+                actions.append({"type": "click", "selector": gate_selector})
+            else:
+                actions.append({"type": "executeJavascript", "script": gate_script})
+
             actions.append({"type": "wait", "milliseconds": 800})
 
         if available_options:
