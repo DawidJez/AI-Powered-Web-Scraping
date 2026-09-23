@@ -6,6 +6,8 @@ import re
 import os
 from itertools import product
 
+from bs4 import BeautifulSoup
+
 from ai_extractor import AIExtractor
 from firecrawl_client import FirecrawlClient
 from excel_exporter import ExcelExporter
@@ -37,7 +39,25 @@ class Orchestrator:
 
         return result
 
-    def resolve_scripts(self, url: str, analisys: dict, filter: dict, max_depth: int = 5) -> list:        
+    def _is_disabled_in_html(self, html: str, selector: str | None) -> bool:
+        """
+        The AI is told to skip disabled twins but breaks that rule now and then, and typing
+        into a disabled input fails silently.
+        """
+        if not selector or not html:
+            return False
+
+        try:
+            found = BeautifulSoup(html, "html.parser").select(selector)
+        except Exception:
+            return False
+
+        if not found:
+            return False
+
+        return all(el.has_attr("disabled") or el.get("aria-disabled") == "true" for el in found)
+
+    def resolve_scripts(self, url: str, analisys: dict, filter: dict, max_depth: int = 5) -> list:
         if analisys.get("confidence") == "none":
             raise ValueError(f"DEBUG: '{filter['name']}' not found in HTML, evidence: {analisys.get('evidence')}")
 
@@ -72,6 +92,13 @@ class Orchestrator:
                 if not isinstance(result, dict):
                     print(f"DEBUG: find_script returned no usable result for '{filter['name']}'")
                     break
+
+                # a control that is disabled in the HTML we just fetched can't be used
+                if self._is_disabled_in_html(data_to_search["html"], result.get("selector")):
+                    print(f"DEBUG: '{filter['name']}' - resolved control is disabled ({result.get('selector')}), digging deeper")
+                    result["script"] = None
+                    result["control_type"] = "none"
+                    result["needs_more_depth"] = True
 
                 # ti has this problem with disabled inputs with "Filter Input"
                 if "www.ti.com" in url:
@@ -297,15 +324,26 @@ class Orchestrator:
             user_prompt: str,
             resolved_pagination: dict | None = None,
             available_fields: list[str] | None = None,
+            unfiltered_total: int | None = None,
         ):
         if available_fields is None:
             available_fields = []
 
         all_results = []
         data = filtered_data.get("filtered_data")
-        
+        filters_applied = bool(filtered_data.get("resolved_scripts"))
+
         for page_data in data:
             extracted = self.extractor.extract(page_data, user_prompt, available_fields)
+
+            # still the whole catalog after filtering - the filter never took effect, and
+            # paginating it would scrape the entire site once per value
+            if filters_applied and unfiltered_total and extracted.get("total_records_declared") == unfiltered_total:
+                raise ValueError(
+                    f"The filter had no effect - the filtered page still reports {unfiltered_total} records, "
+                    f"same as the unfiltered page. Stopping before scraping the whole catalog."
+                )
+
             all_results.append(extracted.get("records", []))
 
             # better check this hardcoded version , it may be useless with current architecture
@@ -592,6 +630,7 @@ class Orchestrator:
             user_prompt,
             resolved_pagination,
             available_fields,
+            page_sample["page_sample_result"].get("total_records_declared"),
         )
 
         flat_all_results = [record for sublist in extracted_data for record in sublist]
@@ -680,6 +719,7 @@ class Orchestrator:
             user_prompt,
             resolved_pagination,
             available_fields,
+            page_sample["page_sample_result"].get("total_records_declared"),
         )
         end_extract = time.time()
 

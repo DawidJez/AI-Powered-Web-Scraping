@@ -233,12 +233,17 @@ class AIExtractor:
             "filtered_page_count" (an integer). If no such counter is visible, set
             "filtered_page_count" to null - do not guess.
 
+            From the same counter, also report the total number of records it states (the 128 in
+            "1-50 of 128") as "total_records_declared" - the total for the CURRENT, possibly
+            filtered view, never a number you remember from elsewhere. Null if not visible.
+
             # Response Format
             Return only valid JSON - a single JSON object, no explanations, no Markdown
             formatting, no extra text:
             {
             "records": [ ... array of record objects as described above ... ],
-            "filtered_page_count": integer or null
+            "filtered_page_count": integer or null,
+            "total_records_declared": integer or null
             }
             If no records match, "records" must be [].
         """)
@@ -332,7 +337,8 @@ class AIExtractor:
         return {
             "records": records,
             "paging_needed": bool(page_count and page_count > 1),
-            "page_count": page_count   
+            "page_count": page_count,
+            "total_records_declared": result.get("total_records_declared")
         }
 
     def suggestion(self, content: str, max_retries: int = 3):
@@ -958,6 +964,8 @@ class AIExtractor:
             never `:has-text(...)`, `:contains(...)`, `:visible`, `>>` or XPath — those are testing-tool
             extensions and no browser parses them. Return null only when the element cannot be addressed
             by a selector at all (it lives in Shadow DOM, or it appears only after another script runs).
+            For a single control (interaction_type "type") return its `selector` the same way,
+            next to `script` - it is checked against the page before the script is trusted.
 
             {apply_button_section}
 
@@ -1004,6 +1012,7 @@ class AIExtractor:
             {
             "chosen_occurrence_index": integer or null,
             "script": string or null,
+            "selector": string or null,
             "available_options": [{"value": string, "script": string, "selector": string or null}, ...],
             "control_type": "final_control" | "intermediate_step" | "none",
             "needs_more_depth": boolean,
