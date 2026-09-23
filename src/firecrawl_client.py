@@ -177,6 +177,18 @@ class FirecrawlClient:
         matched_value = match[0]
         return next(o["script"] for o in available_options if o["value"] == matched_value)
 
+    def _safe_script(self, script: str) -> str:
+        """One crashing executeJavascript kills the whole action sequence, so a bad selector becomes a no-op instead."""
+        return "(function() { try { " + script + " } catch (e) { return 'script error: ' + e.message; } })();"
+
+    def _safe_value_script(self, script: str) -> str:
+        """Same guard where we need the value back - the script is passed as data, so even a syntax error stays catchable."""
+        payload = json.dumps(script)
+
+        # an IIFE evaluates as an expression, a bare statement block only as a function body - read-only checks, safe to try twice
+        return ("(function() { try { return (0, eval)(" + payload + "); } "
+                "catch (e) { try { return (new Function(" + payload + "))(); } catch (e2) { return null; } } })();")
+
     def _usable_selector(self, selector: str | None) -> bool:
         """A native click needs plain CSS - engine extensions never reach the browser."""
         if not selector:
@@ -258,7 +270,7 @@ class FirecrawlClient:
             if self._usable_selector(gate_selector):
                 actions.append({"type": "click", "selector": gate_selector})
             else:
-                actions.append({"type": "executeJavascript", "script": gate_script})
+                actions.append({"type": "executeJavascript", "script": self._safe_script(gate_script)})
 
             actions.append({"type": "wait", "milliseconds": 800})
 
@@ -283,7 +295,7 @@ class FirecrawlClient:
                     if chosen.get("selector"):
                         print(f"WARNING: unusable selector for '{value}', falling back to the script: {chosen['selector']}")
 
-                    actions.append({"type": "executeJavascript", "script": chosen["script"]})
+                    actions.append({"type": "executeJavascript", "script": self._safe_script(chosen["script"])})
 
                 actions.append({"type": "wait", "milliseconds": 1500})
                 matched_any = True
@@ -297,7 +309,7 @@ class FirecrawlClient:
             text = selected_values[0] if len(selected_values) == 1 else ", ".join(selected_values)
 
             script = final_script.replace('"__VALUE__"', json.dumps(text))
-            actions.append({"type": "executeJavascript", "script": script})
+            actions.append({"type": "executeJavascript", "script": self._safe_script(script)})
             actions.append({"type": "wait", "milliseconds": 1500})
         else:
             raise ValueError("DEBUG: resolved filter has neither a final_script nor available_options")
@@ -310,7 +322,7 @@ class FirecrawlClient:
 
         if apply_script:
             return [
-                {"type": "executeJavascript", "script": apply_script},
+                {"type": "executeJavascript", "script": self._safe_script(apply_script)},
                 {"type": "wait", "milliseconds": 1500}
             ]
         return [{"type": "wait", "milliseconds": 700}]
@@ -487,7 +499,7 @@ class FirecrawlClient:
         actions = self._build_multi_filter_actions(resolved_filters, selected_values)
 
         if apply_script:
-            actions.append({"type": "executeJavascript", "script": apply_script})
+            actions.append({"type": "executeJavascript", "script": self._safe_script(apply_script)})
             actions.append({"type": "wait", "milliseconds": 1500})
         else:
             actions.append({"type": "wait", "milliseconds": 700})
@@ -513,7 +525,12 @@ class FirecrawlClient:
         }
     
     def fetch_with_given_actions(self, url: str, actions: list, wait_for: int = 3000):
-        
+        # scripts come in from the outside here too, so they get the same crash guard
+        actions = [
+            {**action, "script": self._safe_script(action["script"])} if action.get("type") == "executeJavascript" else action
+            for action in actions
+        ]
+
         result = self.app.scrape_url(
             url=url,
             formats=['html'],
@@ -577,12 +594,12 @@ class FirecrawlClient:
 
         for _ in range(max_cycles):
             if disabled_check_script:
-                actions.append({"type": "executeJavascript", "script": disabled_check_script})
+                actions.append({"type": "executeJavascript", "script": self._safe_value_script(disabled_check_script)})
 
                 disabled_js_indices.append(js_index)
                 js_index += 1
 
-            actions.append({"type": "executeJavascript", "script": pagination_script})
+            actions.append({"type": "executeJavascript", "script": self._safe_script(pagination_script)})
             js_index += 1
 
             actions.append({"type": "wait", "milliseconds": 3500})

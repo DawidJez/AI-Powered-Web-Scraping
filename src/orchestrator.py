@@ -39,6 +39,32 @@ class Orchestrator:
 
         return result
 
+    def _selector_matches(self, html: str, selector: str | None) -> bool:
+        """
+        Does the selector hit anything in the HTML we analysed? A native click on an invented
+        selector kills the whole Firecrawl request, so an unmatched one is dropped beforehand.
+        """
+        if not selector or not html:
+            return False
+
+        try:
+            return bool(BeautifulSoup(html, "html.parser").select(selector))
+        except Exception:
+            return False
+
+    def _drop_invented_selectors(self, analisys: dict, html: str, name: str) -> None:
+        """Keeps only the selectors that exist in this HTML - the rest fall back to their script."""
+        if analisys.get("gate_selector") and not self._selector_matches(html, analisys["gate_selector"]):
+            print(f"WARNING: gate selector for '{name}' matches nothing in the page ({analisys['gate_selector']}) - using the script instead")
+            analisys["gate_selector"] = None
+
+        for option in analisys.get("available_options") or []:
+            selector = option.get("selector")
+
+            if selector and not self._selector_matches(html, selector):
+                print(f"WARNING: option selector for '{option.get('value')}' matches nothing in the page - using the script instead")
+                option["selector"] = None
+
     def _is_disabled_in_html(self, html: str, selector: str | None) -> bool:
         """
         The AI is told to skip disabled twins but breaks that rule now and then, and typing
@@ -127,7 +153,9 @@ class Orchestrator:
                         break
 
                     scripts.append(result["script"])
-                    selectors.append(result.get("selector"))
+
+                    selector = result.get("selector")
+                    selectors.append(selector if self._selector_matches(data_to_search["html"], selector) else None)
 
                 if not result.get("needs_more_depth", False):
                     break
@@ -236,6 +264,9 @@ class Orchestrator:
 
             analisys = self.search_for_filters(html, search_terms)
             print(f"DEBUG: analisys for filter '{name}': {analisys}")
+
+            if isinstance(analisys, dict):
+                self._drop_invented_selectors(analisys, html, name)
 
             # unusable analysis (empty or wrong shape) - skip instead of crashing downstream
             if not isinstance(analisys, dict) or not analisys:
