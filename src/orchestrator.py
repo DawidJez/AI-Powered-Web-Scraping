@@ -101,6 +101,47 @@ class Orchestrator:
                 print(f"WARNING: option selector for '{option.get('value')}' points at an <option> of a plain dropdown - using the script instead")
                 option["selector"] = None
 
+    def _complete_missing_options(self, analisys: dict, html: str, wanted_values: list, name: str) -> None:
+        """
+        Long option lists come back truncated - if a requested value has a twin in the HTML built
+        the same way as the listed ones, rebuild its entry instead of losing the whole filter.
+        """
+        options = analisys.get("available_options") or []
+
+        if not options or not html or not wanted_values:
+            return
+
+        listed = {(option.get("value") or "").lower() for option in options}
+        template = options[0]
+        template_value = template.get("value") or ""
+        template_script = template.get("script") or ""
+        template_id = re.search(r"getElementById\('([^']+)'\)", template_script)
+        soup = BeautifulSoup(html, "html.parser")
+
+        for value in wanted_values:
+            if not value or not template_value or value.lower() in listed:
+                continue
+
+            script, selector = None, None
+
+            # the options of one facet share an id prefix and differ only by the value at the end
+            if template_id and template_id.group(1).endswith(template_value):
+                new_id = template_id.group(1)[: -len(template_value)] + value
+
+                if soup.find(id=new_id):
+                    script = template_script.replace(template_id.group(1), new_id)
+
+            elif template.get("selector"):
+                candidate = template["selector"].replace(template_value, value)
+
+                if self._selector_matches(html, candidate):
+                    selector = candidate
+                    script = template_script.replace(f"'{template_value}'", f"'{value}'").replace(f'"{template_value}"', f'"{value}"')
+
+            if script:
+                print(f"WARNING: option '{value}' was missing from the model's list for '{name}' - rebuilt from the page")
+                analisys["available_options"].append({"value": value, "script": script, "selector": selector})
+
     def _is_disabled_in_html(self, html: str, selector: str | None) -> bool:
         """
         The AI is told to skip disabled twins but breaks that rule now and then, and typing
@@ -303,6 +344,7 @@ class Orchestrator:
 
             if isinstance(analisys, dict):
                 self._drop_invented_selectors(analisys, html, name)
+                self._complete_missing_options(analisys, html, values, name)
 
             # unusable analysis (empty or wrong shape) - skip instead of crashing downstream
             if not isinstance(analisys, dict) or not analisys:

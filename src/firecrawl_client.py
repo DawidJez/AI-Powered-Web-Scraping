@@ -302,8 +302,12 @@ class FirecrawlClient:
                     print(f"WARNING: no option matching '{value}' - this value will not be applied")
                     continue
 
+                # a checkbox flips from a scripted .click() just fine, and the model's script aims at the
+                # label - the input behind it is often styled away and not clickable at all
+                native_click = resolved.get("interaction_type") != "click_checkbox"
+
                 # a real browser click - some frameworks ignore scripted ones completely
-                if self._usable_selector(chosen.get("selector")):
+                if native_click and self._usable_selector(chosen.get("selector")):
                     actions.append({"type": "click", "selector": chosen["selector"]})
                 else:
                     if chosen.get("selector"):
