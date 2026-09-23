@@ -52,6 +52,37 @@ class Orchestrator:
         except Exception:
             return False
 
+    def _is_closed_select_option(self, html: str, selector: str | None) -> bool:
+        """
+        An <option> of an ordinary dropdown is not a clickable element - the browser paints it only
+        while the list is open, so a native click on it fails and takes the whole request down.
+        """
+        if not selector or not html:
+            return False
+
+        try:
+            found = BeautifulSoup(html, "html.parser").select(selector)
+        except Exception:
+            return False
+
+        if not found or any(el.name != "option" for el in found):
+            return False
+
+        for el in found:
+            parent = el.find_parent("select")
+
+            if parent is None or parent.has_attr("multiple"):
+                return False
+
+            # multiple/size renders the select as a list box, where the options really are clickable
+            try:
+                if int(parent.get("size", 1)) > 1:
+                    return False
+            except (TypeError, ValueError):
+                return False
+
+        return True
+
     def _drop_invented_selectors(self, analisys: dict, html: str, name: str) -> None:
         """Keeps only the selectors that exist in this HTML - the rest fall back to their script."""
         if analisys.get("gate_selector") and not self._selector_matches(html, analisys["gate_selector"]):
@@ -63,6 +94,11 @@ class Orchestrator:
 
             if selector and not self._selector_matches(html, selector):
                 print(f"WARNING: option selector for '{option.get('value')}' matches nothing in the page - using the script instead")
+                option["selector"] = None
+                continue
+
+            if selector and self._is_closed_select_option(html, selector):
+                print(f"WARNING: option selector for '{option.get('value')}' points at an <option> of a plain dropdown - using the script instead")
                 option["selector"] = None
 
     def _is_disabled_in_html(self, html: str, selector: str | None) -> bool:

@@ -589,6 +589,11 @@ class FirecrawlClient:
         max_cycles = max(0, available_budget // actions_per_cycle)
         max_cycles = min(max_cycles, page_count - 1) if page_count else max_cycles
 
+        # the first page is already in hand - with nothing left to page through there is nothing to scrape
+        if max_cycles == 0:
+            print("DEBUG pagination: no further pages to fetch")
+            return []
+
         js_index = sum(1 for a in actions if a["type"] == "executeJavascript")
         disabled_js_indices = []
 
