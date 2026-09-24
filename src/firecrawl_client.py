@@ -190,6 +190,7 @@ class FirecrawlClient:
         return self.VALUE_ASSIGNMENT.sub(self.NATIVE_SETTER, script)
 
     APPLY_SELECTOR = re.compile(r"querySelector(?:All)?\(\s*(['\"])(.+?)\1\s*\)")
+    VALUE_PLACEHOLDER = re.compile(r"""(['"])__VALUE__\1|__VALUE__""")
 
     def _scoped_apply_script(self, script: str) -> str:
         """
@@ -363,7 +364,12 @@ class FirecrawlClient:
                 raise ValueError("DEBUG: identifier filter has no value to type")
             text = selected_values[0] if len(selected_values) == 1 else ", ".join(selected_values)
 
-            script = final_script.replace('"__VALUE__"', json.dumps(text))
+            # the model quotes the placeholder either way, so the quotes are part of what we replace
+            script = self.VALUE_PLACEHOLDER.sub(lambda _: json.dumps(text), final_script)
+
+            if "__VALUE__" in script:
+                print(f"WARNING: could not substitute the value into the filter script - it still holds __VALUE__")
+
             actions.append({"type": "executeJavascript", "script": self._safe_script(script)})
             actions.append({"type": "wait", "milliseconds": 1500})
         else:
