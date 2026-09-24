@@ -8,12 +8,20 @@ from google.genai import errors
 import os
 import json
 import re
+import random
 from bs4 import BeautifulSoup
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed # maybe used in the future
 from markdownify import markdownify
 
 class AIExtractor:
+    RETRY_ATTEMPTS = 5
+    RETRY_BASE_SECONDS = 4
+
+    def _backoff(self, attempt: int) -> float:
+        """Free-tier Gemini rejects in bursts, so back off long enough for the burst to pass."""
+        return self.RETRY_BASE_SECONDS * (2 ** (attempt - 1)) + random.uniform(0, 1)
+
     def __init__(self, api_key: str | None = None):
         self.client = genai.Client(api_key=api_key or os.getenv("GEMINI_API_KEY"))
         self.tokens_usage: list[dict] = []
@@ -132,7 +140,7 @@ class AIExtractor:
                 unique.append(r)
         return unique
 
-    def _detect_total_records(self, markdown_content: str, max_retries: int = 2) -> int | None:
+    def _detect_total_records(self, markdown_content: str, max_retries: int = 3) -> int | None:
         system_instruction = """
             Look at the page content and find a total item/result count if one is
             visible (e.g. "1 - 25 of 58 items", "58 results", "Showing 58 products").
@@ -156,10 +164,10 @@ class AIExtractor:
                 print(f"DEBUG: total_records detection failed (attempt {attempt}): {e}")
                 if attempt == max_retries:
                     return None
-                time.sleep(2)
+                time.sleep(self._backoff(attempt))
         return None
 
-    def _single_extract(self, content: dict, user_prompt: str, fields_instruction: str, max_retries: int = 3):
+    def _single_extract(self, content: dict, user_prompt: str, fields_instruction: str, max_retries: int = RETRY_ATTEMPTS):
 
         markdown_content = content.get("markdown")
         if not markdown_content:
@@ -270,12 +278,12 @@ class AIExtractor:
                 break
             
             except errors.ServerError as e:
-                wait = 2 ** attempt  # 2s, 4s, 8s...
+                wait = self._backoff(attempt)
                 print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait}s")
 
                 if attempt == max_retries:
-                    print("DEBUG: attempts exhausted, returning an empty list for this chunk")
-                    return []
+                    print("DEBUG: attempts exhausted, returning an empty result")
+                    return {"records": [], "filtered_page_count": None, "total_records_declared": None}
 
                 time.sleep(wait)
 
@@ -284,7 +292,7 @@ class AIExtractor:
                     wait = 60
                     print(f"DEBUG: 429 RESOURCE_EXHAUSTED, retry {attempt}/{max_retries} in {wait}s")
                     if attempt == max_retries:
-                        return {"records": [], "filtered_page_count": None}
+                        return {"records": [], "filtered_page_count": None, "total_records_declared": None}
                     time.sleep(wait)
                     continue
                 raise
@@ -324,6 +332,11 @@ class AIExtractor:
         )
 
         result = self._single_extract(filtered_data, user_prompt, fields_instruction)
+
+        # every failure path is supposed to answer with the empty result shape - don't trust it blindly
+        if not isinstance(result, dict):
+            result = {"records": [], "filtered_page_count": None, "total_records_declared": None}
+
         records = self._deduplicate(result.get("records", []))
         page_count = result.get("filtered_page_count")
 
@@ -341,7 +354,7 @@ class AIExtractor:
             "total_records_declared": result.get("total_records_declared")
         }
 
-    def suggestion(self, content: str, max_retries: int = 3):
+    def suggestion(self, content: str, max_retries: int = RETRY_ATTEMPTS):
 
         system_instruction = ("""
             # Role
@@ -482,7 +495,7 @@ class AIExtractor:
                 break
 
             except errors.ServerError as e:
-                wait_time = 2 + 2 ** attempt
+                wait_time = self._backoff(attempt)
 
                 print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
                 # nothing downstream works without the page probe, so stop here instead of
@@ -498,7 +511,7 @@ class AIExtractor:
         return self._json_object(response.text, {})
         
 
-    def analize_html(self, html: str, search_terms: list, max_retries: int = 3):
+    def analize_html(self, html: str, search_terms: list, max_retries: int = RETRY_ATTEMPTS):
         #print(search_terms)
         search_terms = [s for s in search_terms if s and s.strip()]
         #print(f"html: {len(html)} i search_terms ({len(search_terms)}): {search_terms}")
@@ -701,7 +714,7 @@ class AIExtractor:
                 break
 
             except errors.ServerError as e:
-                wait_time = 2 + 2 ** attempt
+                wait_time = self._backoff(attempt)
 
                 print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
                 if attempt == max_retries:
@@ -712,7 +725,7 @@ class AIExtractor:
 
         return self._json_object(response.text, {})
 
-    def find_global_apply_script(self, html: str, max_retries: int = 3):
+    def find_global_apply_script(self, html: str, max_retries: int = RETRY_ATTEMPTS):
         """
         Fallback for sites where the per-filter resolver never sees the real Apply button
         because it lives outside that filter's HTML window (e.g. a shared modal footer).
@@ -778,7 +791,7 @@ class AIExtractor:
                 break
 
             except errors.ServerError as e:
-                wait_time = 2 + 2 ** attempt
+                wait_time = self._backoff(attempt)
                 print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
                 if attempt == max_retries:
                     return {"apply_script": None, "confidence": "none", "evidence": "attempts exhausted"}
@@ -830,7 +843,7 @@ class AIExtractor:
 
         return response.text
     
-    def find_script(self, scripts: list, filter: dict, html: str, apply_script: str = None, max_retries: int = 3) -> dict:
+    def find_script(self, scripts: list, filter: dict, html: str, apply_script: str = None, max_retries: int = RETRY_ATTEMPTS) -> dict:
         """we take the filter["name"] so llm will know what its actually looking for"""
 
         search_terms = filter.get("search_terms") or [filter["name"]]
@@ -1065,7 +1078,7 @@ class AIExtractor:
                 break
 
             except errors.ServerError as e:
-                wait_time = 2 + 2 ** attempt
+                wait_time = self._backoff(attempt)
 
                 print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
                 if attempt == max_retries:
@@ -1097,7 +1110,7 @@ class AIExtractor:
 
         return result
 
-    def resolve_pagination(self, page_probe: dict, html: str , url: str, max_retries: int = 3) -> dict:
+    def resolve_pagination(self, page_probe: dict, html: str , url: str, max_retries: int = RETRY_ATTEMPTS) -> dict:
   
         pagination_search_terms = [
             "Next", "Next Page", "next page", 'aria-label="Next page"', "chevron-right", "pagination-next", 
@@ -1231,7 +1244,7 @@ class AIExtractor:
                 break
 
             except errors.ServerError as e:
-                wait_time = 2 + 2 ** attempt
+                wait_time = self._backoff(attempt)
 
                 print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
                 if attempt == max_retries:
