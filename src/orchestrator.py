@@ -83,11 +83,67 @@ class Orchestrator:
 
         return True
 
+    # the quote style has to be matched by a backreference - selectors often carry the other kind inside
+    SCRIPT_SELECTOR = re.compile(r"querySelector(?:All)?\(\s*(['\"])(.+?)\1\s*\)")
+    SCRIPT_TEXT = re.compile(r"includes\(\s*(['\"])(.+?)\1\s*\)")
+    COLUMN_ATTRIBUTES = ("aria-colindex", "col-id", "data-colindex", "data-field")
+
+    def _repair_gate_selector(self, analisys: dict, html: str, name: str) -> str | None:
+        """
+        A grid puts the header and its filter button in different rows, so the model's scoping by
+        the header alone hits nothing. Both rows carry the same column attribute - scope by that.
+        """
+        script = analisys.get("gate_script") or ""
+        parts = [m.group(2) for m in self.SCRIPT_SELECTOR.finditer(script)]
+        wanted = self.SCRIPT_TEXT.search(script)
+
+        if not parts or not html:
+            return None
+
+        target = parts[-1]
+        label = wanted.group(2) if wanted else name
+        soup = BeautifulSoup(html, "html.parser")
+
+        # the smallest element carrying the label is the header itself, not a wrapper around it
+        headers = [el for el in soup.find_all(True) if label in el.get_text()]
+
+        if not headers:
+            return None
+
+        node = min(headers, key=lambda el: len(el.find_all(True)))
+
+        # the label sits in a plain span, so the column attribute is on one of its ancestors
+        while node is not None and getattr(node, "name", None):
+            for attribute in self.COLUMN_ATTRIBUTES:
+                value = node.get(attribute)
+
+                if not value:
+                    continue
+
+                candidate = f'[{attribute}="{value}"] {target}'
+
+                try:
+                    if len(soup.select(candidate)) == 1:
+                        return candidate
+                except Exception:
+                    continue
+
+            node = node.parent
+
+        return None
+
     def _drop_invented_selectors(self, analisys: dict, html: str, name: str) -> None:
         """Keeps only the selectors that exist in this HTML - the rest fall back to their script."""
+        
         if analisys.get("gate_selector") and not self._selector_matches(html, analisys["gate_selector"]):
-            print(f"WARNING: gate selector for '{name}' matches nothing in the page ({analisys['gate_selector']}) - using the script instead")
-            analisys["gate_selector"] = None
+            repaired = self._repair_gate_selector(analisys, html, name)
+
+            if repaired:
+                print(f"WARNING: gate selector for '{name}' matched nothing ({analisys['gate_selector']}) - rebuilt as {repaired}")
+            else:
+                print(f"WARNING: gate selector for '{name}' matches nothing in the page ({analisys['gate_selector']}) - using the script instead")
+
+            analisys["gate_selector"] = repaired
 
         for option in analisys.get("available_options") or []:
             selector = option.get("selector")
@@ -184,8 +240,15 @@ class Orchestrator:
             for _ in range(1,max_depth):
                 actions = []
 
-                for s in scripts:
-                    actions.append({"type": "executeJavascript", "script": s})
+                for index, s in enumerate(scripts):
+                    selector = selectors[index] if index < len(selectors) else None
+
+                    # same rule as the filter actions - a real click wherever we have a selector for it
+                    if selector:
+                        actions.append({"type": "click", "selector": selector})
+                    else:
+                        actions.append({"type": "executeJavascript", "script": s})
+
                     actions.append({"type": "wait", "milliseconds": 800})
 
                 data_to_search = self.firecrawl.fetch_with_given_actions(url, actions) # we have to go deeper

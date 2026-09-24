@@ -189,7 +189,7 @@ class FirecrawlClient:
         """The model knows the native-setter pattern but skips it half the time - rewrite it either way."""
         return self.VALUE_ASSIGNMENT.sub(self.NATIVE_SETTER, script)
 
-    APPLY_SELECTOR = re.compile(r"querySelector(?:All)?\(\s*['\"]([^'\"]+)['\"]\s*\)")
+    APPLY_SELECTOR = re.compile(r"querySelector(?:All)?\(\s*(['\"])(.+?)\1\s*\)")
 
     def _scoped_apply_script(self, script: str) -> str:
         """
@@ -198,7 +198,7 @@ class FirecrawlClient:
         checkbox-bearing ancestor holds the most of them, so pick that one at runtime.
         """
         # the clicked element is found by the last selector before the click, not by the first one
-        found = self.APPLY_SELECTOR.findall((script or "").split(".click(")[0])
+        found = [m.group(2) for m in self.APPLY_SELECTOR.finditer((script or "").split(".click(")[0])]
 
         if not found:
             return script
