@@ -244,9 +244,57 @@ class FirecrawlClient:
             if isinstance(value, str) and value.startswith("script error"):
                 print(f"WARNING: {value}")
 
+    EVENT_DISPATCH = re.compile(r"([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.dispatchEvent\(\s*new\s+Event\(")
+    INPUT_EVENT = re.compile(r"new\s+Event\(\s*(['\"])input\1")
+
+    def _confirm_with_enter(self, script: str) -> str:
+        """
+        A real keystroke fires keydown and keyup around the input event, and these components often
+        listen for those - dispatching 'input' alone leaves the text sitting in the field.
+        """
+        typed = bool(script) and bool(self.INPUT_EVENT.search(script))
+        submits = "requestSubmit" in (script or "") or ".submit(" in (script or "")
+
+        if not typed or submits or "KeyboardEvent" in script:
+            return script
+
+        matches = list(self.EVENT_DISPATCH.finditer(script))
+
+        if not matches:
+            return script
+
+        last = matches[-1]
+        opening = script.index("(", script.index(".dispatchEvent", last.start()))
+        depth, end = 0, None
+
+        for index in range(opening, len(script)):
+            if script[index] == "(":
+                depth += 1
+            elif script[index] == ")":
+                depth -= 1
+
+                if depth == 0:
+                    end = index + 1
+                    break
+
+        if end is None:
+            return script
+
+        if script[end:end + 1] == ";":
+            end += 1
+
+        receiver = last.group(1)
+        keys = "".join(
+            f" {receiver}.dispatchEvent(new KeyboardEvent('{name}', "
+            "{ bubbles: true, composed: true, key: 'Enter' }));"
+            for name in ("keydown", "keyup")
+        )
+
+        return script[:end] + keys + script[end:]
+
     def _safe_script(self, script: str) -> str:
         """One crashing executeJavascript kills the whole action sequence, so a bad selector becomes a no-op instead."""
-        script = self._real_submit(self._use_native_setter(script))
+        script = self._confirm_with_enter(self._real_submit(self._use_native_setter(script)))
 
         return "(function() { try { " + script + " } catch (e) { return 'script error: ' + e.message; } })();"
 
