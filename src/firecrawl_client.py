@@ -18,8 +18,14 @@ PAGINATION_WAIT_MS = 6000
 
 class FirecrawlClient:
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None, debug: bool = False):
         self.app = FirecrawlApp(api_key=api_key or os.getenv("FIRECRAWL_API_KEY"))
+        self.debug = debug
+
+    def _debug(self, message: str) -> None:
+        """Action dumps are for chasing a problem, not for every production run."""
+        if self.debug:
+            print(message)
     
     def fetch_page(self, url: str, scroll_rounds: int = 10, wait_for: int = 5000) -> dict:
 
@@ -88,111 +94,6 @@ class FirecrawlClient:
             "html": merged_html,
         }
     
-    def _single_fetch(self,url: str, item: str, scripts: list, apply_script: str = None, wait_for: int = 3000) -> dict:
-        actions = []
-
-        gate_scripts = scripts["gate_scripts"]
-        final_script = scripts["final_script"]
-
-        if gate_scripts:
-            for s in gate_scripts:
-                actions.append({"type": "executeJavascript", "script": s})
-                actions.append({"type": "wait", "milliseconds": 800})
-
-        actions.append({"type": "executeJavascript", "script": final_script})
-        actions.append({"type": "wait", "milliseconds": 800})
-
-        actions.append({"type": "write", "text": item})
-        actions.append({"type": "wait", "milliseconds": 800})
-        actions.append({"type": "press", "key": "Enter"})
-        actions.append({"type": "wait", "milliseconds": 1500})
-
-        if apply_script:
-            actions.append({"type": "executeJavascript", "script": apply_script})
-            actions.append({"type": "wait", "milliseconds": 1500})
-        else:
-            actions.append({"type": "wait", "milliseconds": 700})
-
-        result = self.app.scrape_url(
-            url=url,
-            formats=['markdown', 'links'],
-            wait_for=wait_for,
-            actions=actions,
-            proxy="auto"
-        )
-
-        #with open("data/debug_markdown_dump.md", "w", encoding="utf-8") as f:
-        #    f.write(result.markdown)
-
-        return {
-            "markdown": result.markdown,
-            "links": result.links,
-            "metadata": result.metadata
-        }
-    
-    def _bulk_fetch(self,url: str, item_list: list, scripts: dict, apply_script: str = None, wait_for: int = 3000) -> dict:
-        separator: str = ", "
-        text_list = separator.join(item_list)
-
-        actions = []
-
-        gate_scripts = scripts["gate_scripts"]
-        final_script = scripts["final_script"]
-
-        if gate_scripts:
-            for s in gate_scripts:
-                actions.append({"type": "executeJavascript", "script": s})
-                actions.append({"type": "wait", "milliseconds": 800})
-
-        actions.append({"type": "executeJavascript", "script": final_script})
-        actions.append({"type": "wait", "milliseconds": 800})
-
-        actions.append({"type": "write", "text": text_list})
-        actions.append({"type": "wait", "milliseconds": 1500})
-
-        if apply_script:
-            actions.append({"type": "executeJavascript", "script": apply_script})
-            actions.append({"type": "wait", "milliseconds": 1500})
-        else:
-            actions.append({"type": "wait", "milliseconds": 700})
-
-        result = self.app.scrape_url(
-            url=url,
-            formats=['markdown', 'links'],
-            wait_for=wait_for,
-            actions=actions,
-            proxy="auto"
-        )
-
-        return {
-            "markdown": result.markdown,
-            "links": result.links,
-            "metadata": result.metadata
-        }
-    
-    def _resolve_choosen_option(self, available_options: list, wanted_value: str):
-        values = [opt["value"] for opt in available_options]
-        match = difflib.get_close_matches(wanted_value, values, n=1, cutoff=0.4)
-
-        if not match:
-            return None
-        
-        matched_value = match[0]
-        return next(o["script"] for o in available_options if o["value"] == matched_value)
-
-    # a plain `el.value = x` is swallowed by React/Vue controlled inputs - the native setter is not
-    VALUE_ASSIGNMENT = re.compile(r"([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.value\s*=(?!=)\s*([^;]+);")
-    NATIVE_SETTER = (
-        "(function(el, v) { const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype "
-        ": (el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype); "
-        "Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, v); })(\\1, \\2);"
-    )
-
-    # a hand-made submit event only runs the handlers - the browser never submits on it
-    SUBMIT_DISPATCH = re.compile(
-        r"([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.dispatchEvent\(\s*new\s+Event\(\s*(['\"])submit\2[^)]*\)\s*\)\s*;"
-    )
-
     def _real_submit(self, script: str) -> str:
         """requestSubmit still fires a real submit event, so the handlers the model wanted run too."""
         return self.SUBMIT_DISPATCH.sub(
@@ -339,40 +240,6 @@ class FirecrawlClient:
 
         return lowered[match[0]]
     
-    def _category_fetch(self, url: str, scripts: list, choosen_script: str, apply_script: str = None, wait_for: int = 3000) -> dict:
-        if not choosen_script:
-            raise ValueError(f"DEBUG: no chosen_options, nothing to choose from for '{choosen_script}'")
-
-        gate_scripts = scripts["gate_scripts"]
-        
-        actions = []
-        for s in gate_scripts:
-            actions.append({"type": "executeJavascript", "script": s})
-            actions.append({"type": "wait", "milliseconds": 800})
-    
-        actions.append({"type": "executeJavascript", "script": choosen_script})
-        actions.append({"type": "wait", "milliseconds": 1500})
-
-        if apply_script:
-            actions.append({"type": "executeJavascript", "script": apply_script})
-            actions.append({"type": "wait", "milliseconds": 1500})
-        else:
-            actions.append({"type": "wait", "milliseconds": 700})
-
-        result = self.app.scrape_url(
-            url=url,
-            formats=['markdown', 'links'],
-            wait_for=wait_for,
-            actions=actions,
-            proxy="auto"
-        )
-
-        return {
-            "markdown": result.markdown,
-            "links": result.links,
-            "metadata": result.metadata
-        }
-
     def _build_actions_for_filter(self, resolved: dict, selected_values: list[str]) -> list:
         """Builds ONLY the gate + selection actions for one filter. apply_script is
         handled separately by the caller (once, at the end of the whole sequence)."""
@@ -492,7 +359,7 @@ class FirecrawlClient:
         if not actions:
             raise ValueError("No filters resolved to any action")
 
-        print(f"DEBUG: actions: {actions}")
+        self._debug(f"DEBUG: actions: {actions}")
 
         result = self.app.scrape_url(
             url=url,
@@ -633,7 +500,7 @@ class FirecrawlClient:
         else:
             actions.append({"type": "wait", "milliseconds": 700})
 
-        print(f"DEBUG: actions: {actions}")
+        self._debug(f"DEBUG: actions: {actions}")
 
         result = self.app.scrape_url(
             url=url,
@@ -724,7 +591,7 @@ class FirecrawlClient:
 
         # the first page is already in hand - with nothing left to page through there is nothing to scrape
         if max_cycles == 0:
-            print("DEBUG pagination: no further pages to fetch")
+            self._debug("DEBUG pagination: no further pages to fetch")
             return []
 
         js_index = sum(1 for a in actions if a["type"] == "executeJavascript")
@@ -743,7 +610,7 @@ class FirecrawlClient:
             actions.append({"type": "wait", "milliseconds": PAGINATION_WAIT_MS})
             actions.append({"type": "scrape"})
 
-        print(f"DEBUG: actions: {actions}")
+        self._debug(f"DEBUG: actions: {actions}")
 
         result = self.app.scrape_url(
             url=url,
@@ -769,7 +636,7 @@ class FirecrawlClient:
             seen_hashes.add(page_hash)
             pages.append({"markdown": None, "html": scrape["html"]})
 
-        print(f"DEBUG pagination: {len(raw_scrapes)} scrapes -> {len(pages)} unique pages")
+        self._debug(f"DEBUG pagination: {len(raw_scrapes)} scrapes -> {len(pages)} unique pages")
 
         # an identical page means the click changed nothing in time - that page is simply lost
         if len(pages) < len(raw_scrapes):
@@ -802,17 +669,18 @@ class FirecrawlClient:
                     break
 
             # diagnostics only - this flag is unreliable mid-refresh, it no longer trims
-            print(f"DEBUG pagination: stop_at={stop_at} (diagnostic only, not used for trimming)")
+            self._debug(f"DEBUG pagination: stop_at={stop_at} (diagnostic only, not used for trimming)")
 
-        with open("data/debug_pagination_pages.json", "w", encoding="utf-8") as f:
-            json.dump({
-                "raw_scrapes": result.actions.get("scrapes", []),
-                "pages": pages,
-                "javascriptReturns": result.actions.get("javascriptReturns"),
-                "disabled_js_indices": disabled_js_indices,
-                "stop_at": stop_at if disabled_check_script else None,
-                "actions": actions,
-            }, f, ensure_ascii=False, indent=2)
+        if self.debug:
+            with open("data/debug_pagination_pages.json", "w", encoding="utf-8") as f:
+                json.dump({
+                    "raw_scrapes": result.actions.get("scrapes", []),
+                    "pages": pages,
+                    "javascriptReturns": result.actions.get("javascriptReturns"),
+                    "disabled_js_indices": disabled_js_indices,
+                    "stop_at": stop_at if disabled_check_script else None,
+                    "actions": actions,
+                }, f, ensure_ascii=False, indent=2)
 
         return pages
 
