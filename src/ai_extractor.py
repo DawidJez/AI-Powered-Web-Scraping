@@ -621,10 +621,14 @@ class AIExtractor:
             already has its own unique, literal attribute (id, placeholder) that doesn't repeat elsewhere.
 
             # MULTIPLE OPTIONS MODE (click_checkbox / click_option / select_dropdown)
-            Don't return one target_script — find ALL selectable options and report each as
+            Don't return one target_script — find the selectable options and report each as
             `{"value": ..., "script": ..., "selector": ...}` (a script clicking that SPECIFIC option, never
             a shared template) in `available_options`; leave `target_script` null. Note in "evidence" if the
             option set looks partial (e.g. scrolled).
+
+            Return AT MOST 15 options. A truncated reply is worthless, so on a long list report every option
+            matching the target label above first, then fill the rest up to 15 and say so in "evidence" —
+            never start enumerating hundreds of them.
 
             # NATIVE CLICK SELECTOR — fill `selector` whenever you can
             Some frameworks ignore scripted clicks entirely and only react to a real browser click, which is
@@ -711,7 +715,16 @@ class AIExtractor:
                     "output_tokens": metadata.candidates_token_count,
                     "total_tokens": metadata.total_token_count
                 })
-                break
+                parsed = self._json_object(response.text, None)
+
+                # a truncated reply is as retryable as a 503 - the model rarely cuts off twice in a row
+                if parsed is None and attempt < max_retries:
+                    wait_time = self._backoff(attempt)
+                    print(f"DEBUG: unusable response, retry {attempt}/{max_retries} in {wait_time}s")
+                    time.sleep(wait_time)
+                    continue
+
+                return parsed if parsed is not None else {}
 
             except errors.ServerError as e:
                 wait_time = self._backoff(attempt)
@@ -723,7 +736,7 @@ class AIExtractor:
                 
                 time.sleep(wait_time)
 
-        return self._json_object(response.text, {})
+        return {}
 
     def find_global_apply_script(self, html: str, max_retries: int = RETRY_ATTEMPTS):
         """
@@ -976,6 +989,10 @@ class AIExtractor:
             leave `script` null. Note in "evidence" if the option set looks partial. For "type", ignore this —
             return a single `script`, empty `available_options`.
 
+            Return AT MOST 15 options. A truncated reply is worthless, so on a long list report every option
+            matching the target label above first, then fill the rest up to 15 and say so in "evidence" —
+            never start enumerating hundreds of them.
+
             # NATIVE CLICK SELECTOR — fill `selector` whenever you can
             Some frameworks ignore scripted clicks entirely and only react to a real browser click, which is
             driven by a plain CSS selector instead of JS. So for every option also return `selector`: the CSS
@@ -1054,6 +1071,7 @@ class AIExtractor:
             history_block = "Already-clicked scripts so far (in order): " + " -> ".join(scripts)
 
         response = None
+        result = None
         for attempt in range(1, max_retries + 1):
             try:
                 response = self.client.models.generate_content(
@@ -1075,6 +1093,17 @@ class AIExtractor:
                     "output_tokens": metadata.candidates_token_count,
                     "total_tokens": metadata.total_token_count
                 })
+
+                parsed = self._json_object(response.text, None)
+
+                # a truncated reply is as retryable as a 503 - the model rarely cuts off twice in a row
+                if parsed is None and attempt < max_retries:
+                    wait_time = self._backoff(attempt)
+                    print(f"DEBUG: unusable response, retry {attempt}/{max_retries} in {wait_time}s")
+                    time.sleep(wait_time)
+                    continue
+
+                result = parsed
                 break
 
             except errors.ServerError as e:
@@ -1096,8 +1125,6 @@ class AIExtractor:
                     time.sleep(wait_time)
                     continue
                 raise
-
-        result = self._json_object(response.text)
 
         if result is None:
             return None
