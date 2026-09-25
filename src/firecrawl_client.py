@@ -13,6 +13,9 @@ load_dotenv()
 # these controls allow one value at a time - needed in selecting which interaction to perform
 EXCLUSIVE_INTERACTIONS = {"click_option", "select_dropdown"}
 
+# the slowest grid we scrape refreshes over AJAX - scraping too early returns the previous page
+PAGINATION_WAIT_MS = 6000
+
 class FirecrawlClient:
 
     def __init__(self, api_key: str | None = None):
@@ -737,7 +740,7 @@ class FirecrawlClient:
             actions.append({"type": "executeJavascript", "script": self._safe_script(pagination_script)})
             js_index += 1
 
-            actions.append({"type": "wait", "milliseconds": 3500})
+            actions.append({"type": "wait", "milliseconds": PAGINATION_WAIT_MS})
             actions.append({"type": "scrape"})
 
         print(f"DEBUG: actions: {actions}")
@@ -767,6 +770,11 @@ class FirecrawlClient:
             pages.append({"markdown": None, "html": scrape["html"]})
 
         print(f"DEBUG pagination: {len(raw_scrapes)} scrapes -> {len(pages)} unique pages")
+
+        # an identical page means the click changed nothing in time - that page is simply lost
+        if len(pages) < len(raw_scrapes):
+            print(f"WARNING: {len(raw_scrapes) - len(pages)} paginated page(s) came back unchanged and were dropped - "
+                  f"the grid was probably still refreshing after {PAGINATION_WAIT_MS}ms")
 
         stop_at = None
         if disabled_check_script:
