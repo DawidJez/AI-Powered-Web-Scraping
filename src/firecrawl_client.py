@@ -185,6 +185,19 @@ class FirecrawlClient:
         "Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, v); })(\\1, \\2);"
     )
 
+    # a hand-made submit event only runs the handlers - the browser never submits on it
+    SUBMIT_DISPATCH = re.compile(
+        r"([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.dispatchEvent\(\s*new\s+Event\(\s*(['\"])submit\2[^)]*\)\s*\)\s*;"
+    )
+
+    def _real_submit(self, script: str) -> str:
+        """requestSubmit still fires a real submit event, so the handlers the model wanted run too."""
+        return self.SUBMIT_DISPATCH.sub(
+            lambda match: "(function(f) { if (f && f.requestSubmit) { f.requestSubmit(); } "
+                          "else if (f) { f.submit(); } })(" + match.group(1) + ");",
+            script,
+        )
+
     def _use_native_setter(self, script: str) -> str:
         """The model knows the native-setter pattern but skips it half the time - rewrite it either way."""
         return self.VALUE_ASSIGNMENT.sub(self.NATIVE_SETTER, script)
@@ -233,7 +246,7 @@ class FirecrawlClient:
 
     def _safe_script(self, script: str) -> str:
         """One crashing executeJavascript kills the whole action sequence, so a bad selector becomes a no-op instead."""
-        script = self._use_native_setter(script)
+        script = self._real_submit(self._use_native_setter(script))
 
         return "(function() { try { " + script + " } catch (e) { return 'script error: ' + e.message; } })();"
 
@@ -356,8 +369,10 @@ class FirecrawlClient:
                 actions.append({"type": "wait", "milliseconds": 1500})
                 matched_any = True
 
+            # one unmatched filter is not a reason to lose the whole run - the no-op guard still watches the result
             if not matched_any:
-                raise ValueError(f"DEBUG: none of the values {selected_values} matched an available option")
+                print(f"WARNING: none of the values {selected_values} matched an option - this filter will not be applied")
+                return []
 
         elif final_script:
             if not selected_values:
