@@ -39,6 +39,38 @@ class Orchestrator:
 
         return result
 
+    def _last_compound(self, selector: str | None) -> str | None:
+        
+        if not selector:
+            return None
+
+        depth, quote, start = 0, None, 0
+
+        for index, char in enumerate(selector):
+            if quote:
+                if char == quote:
+                    quote = None
+            elif char in "\"'":
+                quote = char
+            elif char == "[":
+                depth += 1
+            elif char == "]":
+                depth = max(0, depth - 1)
+            elif depth == 0 and (char.isspace() or char in ">+~"):
+                start = index + 1
+
+        return selector[start:].strip() or None
+
+    def _selector_hits(self, html: str, selector: str | None) -> int:
+        """How many elements the selector really hits - unusable ones count as zero."""
+        if not selector or not html:
+            return 0
+
+        try:
+            return len(BeautifulSoup(html, "html.parser").select(selector))
+        except Exception:
+            return 0
+
     def _selector_matches(self, html: str, selector: str | None) -> bool:
         """
         Does the selector hit anything in the HTML we analysed? A native click on an invented
@@ -94,13 +126,16 @@ class Orchestrator:
         the header alone hits nothing. Both rows carry the same column attribute - scope by that.
         """
         script = analisys.get("gate_script") or ""
-        parts = [m.group(2) for m in self.SCRIPT_SELECTOR.finditer(script)]
+        selector = analisys.get("gate_selector") or ""
         wanted = self.SCRIPT_TEXT.search(script)
 
-        if not parts or not html:
+        # the control itself is the last part of the selector, and the last one the script looks up
+        targets = [part for part in [self._last_compound(selector)] if part]
+        targets += [m.group(2) for m in self.SCRIPT_SELECTOR.finditer(script)][-1:]
+
+        if not targets or not html:
             return None
 
-        target = parts[-1]
         label = wanted.group(2) if wanted else name
         soup = BeautifulSoup(html, "html.parser")
 
@@ -120,13 +155,14 @@ class Orchestrator:
                 if not value:
                     continue
 
-                candidate = f'[{attribute}="{value}"] {target}'
+                for target in targets:
+                    candidate = f'[{attribute}="{value}"] {target}'
 
-                try:
-                    if len(soup.select(candidate)) == 1:
-                        return candidate
-                except Exception:
-                    continue
+                    try:
+                        if len(soup.select(candidate)) == 1:
+                            return candidate
+                    except Exception:
+                        continue
 
             node = node.parent
 
@@ -135,13 +171,17 @@ class Orchestrator:
     def _drop_invented_selectors(self, analisys: dict, html: str, name: str) -> None:
         """Keeps only the selectors that exist in this HTML - the rest fall back to their script."""
         
-        if analisys.get("gate_selector") and not self._selector_matches(html, analisys["gate_selector"]):
+        hits = self._selector_hits(html, analisys.get("gate_selector"))
+
+        # a native click takes the first match, so an ambiguous gate opens the wrong column's menu
+        if analisys.get("gate_selector") and hits != 1:
             repaired = self._repair_gate_selector(analisys, html, name)
+            trouble = "matches nothing" if hits == 0 else f"matches {hits} elements"
 
             if repaired:
-                print(f"WARNING: gate selector for '{name}' matched nothing ({analisys['gate_selector']}) - rebuilt as {repaired}")
+                print(f"WARNING: gate selector for '{name}' {trouble} ({analisys['gate_selector']}) - rebuilt as {repaired}")
             else:
-                print(f"WARNING: gate selector for '{name}' matches nothing in the page ({analisys['gate_selector']}) - using the script instead")
+                print(f"WARNING: gate selector for '{name}' {trouble} in the page ({analisys['gate_selector']}) - using the script instead")
 
             analisys["gate_selector"] = repaired
 
@@ -380,10 +420,10 @@ class Orchestrator:
                 if matched_field is None:
                     matched_field = next((f for f in available_fields if name.lower() in f.lower()), None)
 
+                # the model's own lists are not a guarantee - let the HTML have the last word
                 if matched_field is None:
-                    print(f"WARNING: filter '{name}' not found in detected filter_options - skipping it")
-                    skipped_filters.append({"name": name, "reason": "not found in filter_options"})
-                    continue
+                    print(f"WARNING: filter '{name}' is not in the detected filter_options - looking for it in the page anyway")
+                    matched_field = name
 
                 matched_field_lc = matched_field.lower()
                 if any(hint in matched_field_lc for hint in identifier_hints):
