@@ -53,7 +53,10 @@ class FirecrawlClient:
             "metadata": result.metadata.model_dump() if result.metadata else None,
         }                            # dict type data
 
-    # NOT USED
+    SUBMIT_DISPATCH = re.compile(
+        r"([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.dispatchEvent\(\s*new\s+Event\(\s*(['\"])submit\2[^;]*;"
+    )
+
     def _real_submit(self, script: str) -> str:
         """requestSubmit still fires a real submit event, so the handlers the model wanted run too."""
         return self.SUBMIT_DISPATCH.sub(
@@ -61,6 +64,13 @@ class FirecrawlClient:
                           "else if (f) { f.submit(); } })(" + match.group(1) + ");",
             script,
         )
+
+    VALUE_ASSIGNMENT = re.compile(r"([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.value\s*=(?!=)\s*([^;]+);")
+    NATIVE_SETTER = (
+        r"(function(el, v) { const proto = Object.getPrototypeOf(el); "
+        r"const found = Object.getOwnPropertyDescriptor(proto, 'value'); "
+        r"if (found && found.set) { found.set.call(el, v); } else { el.value = v; } })(\1, \2);"
+    )
 
     def _use_native_setter(self, script: str) -> str:
         """The model knows the native-setter pattern but skips it half the time - rewrite it either way."""
