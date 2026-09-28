@@ -1175,6 +1175,15 @@ class AIExtractor:
             # What to avoid
             - "Previous"/"Back" controls, or numbered page buttons (e.g. a button literally
               labeled "3") - only the control that moves FORWARD by one page.
+            - Selecting the control through an attribute that carries a page NUMBER or INDEX
+              (data-page="1", data-index="2", href="?page=3" and the like). That number
+              describes the page you are looking at right now, so the same script sends every
+              later click back to the same place - and such a selector usually matches a
+              numbered page button before it ever reaches the arrow. Identify the control by
+              what actually makes it "next": its own class, aria-label, title, rel="next", the
+              chevron icon or its text. If nothing but the number tells it apart, read the
+              currently active page from the DOM at click time (aria-current, the selected or
+              active class) and click the one that follows it.
             - A control that navigates to an entirely different page/URL outside the current
               catalog view (e.g. a breadcrumb link).
             - Treating a disabled/hidden element as clickable - if the ONLY next-page control
