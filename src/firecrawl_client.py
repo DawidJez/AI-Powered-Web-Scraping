@@ -54,46 +54,6 @@ class FirecrawlClient:
         }                            # dict type data
 
     # NOT USED
-    def fetch_all_pages(self, url: str, pages_count: int = 8, id_term: str = "[aria-label*='Next' i]", wait_for: int = 3000) -> list[dict[str, str]]:
-        all_pages = []
-
-        for page_num in range(pages_count):
-            actions = []
-        
-            for _ in range(page_num):
-                actions.append({"type": "executeJavasript", "script": id_term})
-                actions.append({"type": "wait", "milliseconds": 800})
-
-            result = self.app.scrape_url(
-                url=url, 
-                formats=["markdown", "html"], 
-                wait_for=wait_for,
-                actions=actions,
-                proxy="auto"
-            )
-
-            all_pages.append({"markdown": result.markdown, "html": result.html})
-
-        return all_pages
-
-    # currently not used
-    def merge_pages(self, pages: list[dict[str, str]]) -> dict[str, str]:
-        # Merge multiple paginated page results into a single markdown/html document.
-        if not pages:
-            return {"markdown": "", "html": ""}
-
-        merged_markdown = "\n\n".join(
-            page.get("markdown", "").strip() for page in pages if page.get("markdown")
-        )
-        merged_html = "\n".join(
-            page.get("html", "").strip() for page in pages if page.get("html")
-        )
-
-        return {
-            "markdown": merged_markdown,
-            "html": merged_html,
-        }
-    
     def _real_submit(self, script: str) -> str:
         """requestSubmit still fires a real submit event, so the handlers the model wanted run too."""
         return self.SUBMIT_DISPATCH.sub(
@@ -321,15 +281,6 @@ class FirecrawlClient:
             ]
         return [{"type": "wait", "milliseconds": 700}]
 
-
-    def _build_select_script(select_selector: str, option_value: str) -> str:
-        return f"""
-            const select = document.querySelector('{select_selector}');
-            const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
-            setter.call(select, '{option_value}');
-            select.dispatchEvent(new Event('input', {{ bubbles: true }}));
-            select.dispatchEvent(new Event('change', {{ bubbles: true }}));
-        """
 
     def _label_for(self, category_entries: list[dict], extra_value: str | None) -> str:
         parts = [f"{e['name']}={','.join(e.get('values') or [])}" for e in category_entries]

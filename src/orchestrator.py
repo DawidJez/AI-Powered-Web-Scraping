@@ -755,25 +755,6 @@ class Orchestrator:
 
         return [{"name": name, "hints": hints, "values": values}] if name else []
 
-    # currently unused
-    def resolve_filters(self, html: str, filters: list[dict]) -> list[dict]:
-        """
-        Resolve each filter independently using the existing AI logic.
-        """
-        resolved = []
-        for filter_def in filters:
-            name = filter_def.get("name", "").strip()
-            hints = list(filter_def.get("hints") or [])
-            search_terms = [name] + [h for h in hints if h]
-
-            if not name:
-                continue
-
-            resolved.append(self.search_for_filters(html, search_terms))
-        return resolved
-
-
-
     def run(self):
         """
         Interactive entrypoint - the whole program lives here.

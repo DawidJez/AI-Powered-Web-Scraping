@@ -118,17 +118,6 @@ class AIExtractor:
 
         return parsed
 
-    def _chunk_segmentation(self, load: str, chunk_size: int, overlap: int = 2000) -> list[str]:
-        chunks = []
-        start = 0
-
-        while start < len(load):
-            end = start + chunk_size
-            chunks.append(load[start:end])
-            start = end - overlap # overlap needed if record would be cut in half during chunking
-        
-        return chunks
-    
     def _deduplicate(self, records: list[dict]) -> list[dict]:
         seen = set()
         unique = []
