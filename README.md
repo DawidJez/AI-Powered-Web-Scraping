@@ -93,6 +93,21 @@ Includes:
 - KOA Speer (resistors)
 - And more...
 
+### Debug output
+
+Both clients take a `debug` flag, and `Orchestrator` passes it down:
+
+```python
+Orchestrator(debug=True)     # action dumps, model responses, retry chatter
+Orchestrator()               # quiet - warnings only
+```
+
+`run_debug()` turns the flag on by itself, so the interactive test suite is always verbose.
+A production run through `main.py` stays quiet, but never silent: anything that costs you
+records is printed as a `WARNING` regardless of the flag - an unmatched filter value, a page
+the model gave up on, a paginated page that came back unchanged, a script that threw in the
+browser. If a run ends with fewer records than expected, those lines are the first place to look.
+
 ---
 
 ## Architecture
@@ -115,14 +130,15 @@ flowchart TD
     AN --> RS["resolve_scripts(url, analysis, filter)\nresolve gate / final JS"]
     RS --> F["filtered_scraping(...)\nFirecrawlClient.fetch_filtered_data()"]
 
-    F --> CARD{"Filter cardinality"}
-    CARD -->|identifier| SINGLE["_single_fetch()\nwrite value + Enter"]
-    CARD -->|bulk| BULK["_bulk_fetch()\nwrite multiple values"]
-    CARD -->|category| CAT["_category_fetch()\nchoose option script"]
+    F --> CARD{"interaction_type"}
+    CARD -->|type| WRITE["_build_actions_for_filter()\nnative click + write + Enter"]
+    CARD -->|click_checkbox| CHECK["_build_actions_for_filter()\nnative click per value"]
+    CARD -->|click_option / select_dropdown| ONE["_build_actions_for_filter()\none value per fetch"]
 
-    SINGLE --> DATA["filtered_data\nmarkdown + links"]
-    BULK --> DATA
-    CAT --> DATA
+    WRITE --> APPLY["_apply_action()\npage-level Apply button"]
+    CHECK --> APPLY
+    ONE --> APPLY
+    APPLY --> DATA["filtered_data\nmarkdown + links"]
 
     DATA --> EXT["extract_data(...)\nAIExtractor.extract()"]
     EXT --> PAGCHECK{"paging_needed?"}
@@ -200,6 +216,27 @@ Save to Excel via `ExcelExporter`. Optionally download PDFs with `PDFDownloader`
 | `excel_exporter.py` | Generate Excel files from extracted records |
 | `pdf_downloader.py` | Download datasheets for matched products |
 
+### Script rewriters
+
+The model writes the JavaScript, but it is not shipped to the browser as written. Every snippet
+goes through `_safe_script()` in `firecrawl_client.py`, which wraps it in try/catch (so a broken
+script reports itself instead of killing the run) and rewrites the patterns the model gets wrong
+often enough to be worth automating:
+
+| Rewriter | What it fixes |
+|----------|---------------|
+| `_use_native_setter()` | `el.value = x` is swallowed by React/Vue controlled inputs - rewritten into a call to the prototype's native setter, which is where the framework reads from |
+| `_real_submit()` | `form.dispatchEvent(new Event('submit'))` runs the handlers but never submits - rewritten to `requestSubmit()` |
+| `_confirm_with_enter()` | a synthetic `input` event is not a keystroke - appends keydown/keyup Enter when the script types but never confirms |
+| `_scoped_apply_script()` | Apply buttons come in twins (one per filter panel plus a page-level one) - picks the visible one whose nearest checkbox-bearing ancestor holds the most of them |
+| `_advancing_next_script()` | a next-page control selected by an attribute holding a page number only works once - resolves the current page from the DOM at click time and takes the one after it |
+
+Where a selector exists, the action is a native `click` rather than a scripted one: AG Grid menus
+and some frameworks ignore `element.click()` from `executeJavascript` but honour a real browser
+click. The exception is an `<option>` of a plain closed `<select>`, which is not natively
+clickable - `_is_closed_select_option()` in `orchestrator.py` detects that case and falls back
+to the script.
+
 ### Typical flow in the interactive app
 
 When the app is used interactively, the expected sequence is:
@@ -229,9 +266,9 @@ The app then locates the filter, generates interaction JavaScript, applies filte
 
 ---
 
-## Developers: Contributing to this project
+## Developers: Navigating this repo
 
-### How to navigate this repo
+### Where to start reading
 
 **If you're new, read in this order:**
 
@@ -257,9 +294,11 @@ tests/
   manual_tests/           # Development test runners
   older_code/             # Legacy site-specific scrapers (reference only)
 
-data/                     # Generated during runtime (ignored by git) 
-  ├── datasheets/  # Cached PDF datasheets
-  └── excel/              # Output Excel files
+data/                     # Generated during runtime (ignored by git)
+  docs/                   # Developer guide
+  excel/                  # Output Excel files
+  datasheets/             # Downloaded PDF datasheets
+  resolved_pagination/    # Cached pagination scripts, 24h per URL
 
 .env.example              # Template for credentials
 requirements.txt          # Pinned dependency versions
@@ -333,6 +372,28 @@ When a page fails, the most effective debugging flow is:
 
 ---
 
+## Working with the free Gemini tier
+
+The pipeline is built around the free Gemini tier, and that tier is the single largest source
+of noise in a run. Expect this:
+
+- **503 `UNAVAILABLE` comes in bursts.** Every call retries with exponential backoff and jitter
+  (`RETRY_ATTEMPTS = 5`, starting at 4s). Most bursts clear inside two retries.
+- **Don't trust results from the afternoon.** In practice the API degrades sharply after ~13:00
+  local time, and there have been days when nothing went through from 15:00 onwards. A test that
+  fails at 16:00 usually tells you nothing about your code. Schedule real test runs for the morning.
+- **A page the model never answers for is not an empty page.** When retries run out, the extractor
+  returns an empty result with `unavailable: True`, the orchestrator counts it, and the run ends
+  with `WARNING: the result is incomplete - N page(s) could not be read`. Check that line before
+  concluding that a filter or pagination is broken.
+- **A truncated JSON reply is retried like a 503**, because the model rarely cuts off twice in a row.
+
+Firecrawl has hard limits of its own that shape the pagination loop: **50 actions** and
+**60 seconds of total wait time** per scrape. Both are budgeted in `fetch_with_pagination()`,
+so a long run silently collects fewer cycles rather than failing the request.
+
+---
+
 ## Known Limitations
 
 ### 1. Filtering is not fully general
@@ -362,13 +423,12 @@ The model may occasionally pick a stale or incorrect selector. This is a top qua
 ✗ Date pickers  
 ✗ Complex multi-select patterns
 
-### 6. Code is intentionally experimental
+### 6. One site-specific remnant is left in the code
 
-- Prototype scripts still present
-- Debug output scattered around
-- Old helper logic not fully cleaned up
+`resolve_scripts()` still special-cases a Texas Instruments label (`"Filter Input"`). It is the
+last hardcoded site detail in the pipeline and is tracked in the roadmap below.
 
-### 6. PDF download depends on site
+### 7. PDF download depends on site
 
 Not all sites provide datasheet URLs. Extraction accuracy varies.
 
@@ -410,19 +470,24 @@ pip list --outdated
    - Track token usage with timestamps (not just a request counter)
    - If cumulative tokens used in the current rolling window (e.g. last 60s) approach a threshold (e.g. 200k), sleep before the next call instead of relying on retry-after-error alone
 
-4. **Generalize filter logic**
+4. **Remove the last hardcoded site detail**
+   - `resolve_scripts()` still matches a Texas Instruments label (`"Filter Input"`) by name
+   - Everything else in the pipeline is resolved from the page, so this one line is what stops
+     the project from being honestly described as site-agnostic
+
+5. **Generalize filter logic**
    - Support more filter types
-   - Reduce site-specific patches
    - Improve selector reliability
 
-5. **Improve pagination**
-   - Detect page counts reliably
+6. **Improve pagination**
+   - Detect page counts reliably (the model does not always return `filtered_page_count`,
+     and the loop then pages blind up to the action/time budget)
    - Support virtualized grids
-   - Handle more next-page patterns
+   - Stop clicking into a next control that is already exhausted
 
-6. **Harden the AI contract**
-   - Stricter JSON validation
-   - Better error handling
+7. **Harden the AI contract**
+   - Use Gemini's `response_schema` instead of parsing free-form JSON and retrying on failure
+   - Stricter validation of what comes back
    - Clearer retry logic
 
 7. **Add test coverage**
@@ -438,7 +503,13 @@ pip list --outdated
 1. **Parallelize PDF downloads**
    - `PDFDownloader` currently downloads sequentially; move to a thread pool (similar to the pattern already used for page processing) for faster datasheet collection
 
-2. **LLM-assisted field matching for user input**
+2. **Repair facet choices that match on a substring**
+   - A filter named `Type` can resolve to a `Component Type` facet, because the HTML windows are
+     chosen by search term and one name contains the other
+   - Needs the same treatment `_repair_gate_selector()` already gives ambiguous gate selectors:
+     let the HTML decide, not the model's own label matching
+
+3. **LLM-assisted field matching for user input**
    - When a user-provided filter field name doesn't cleanly match anything in `available_fields`, have the AI propose the closest match and confirm with the user in a loop, instead of failing outright
 
 ### Low priority
