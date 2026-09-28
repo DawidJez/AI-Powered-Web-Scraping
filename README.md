@@ -388,6 +388,34 @@ of noise in a run. Expect this:
   concluding that a filter or pagination is broken.
 - **A truncated JSON reply is retried like a 503**, because the model rarely cuts off twice in a row.
 
+### Staying inside the quota
+
+Every model call goes through `AIExtractor._generate()`, which is the only place that talks to
+Gemini. Before a call it holds the request back if the last 60 seconds have already used up the
+per-minute budget, and after a call it records what the request actually cost. Waiting a few
+seconds is cheaper than a 429, which costs a fixed minute.
+
+The limits live at the top of `ai_extractor.py`:
+
+```python
+REQUESTS_PER_MINUTE = 15
+TOKENS_PER_MINUTE = 250_000
+REQUESTS_PER_DAY = 500
+```
+
+These are the free-tier numbers for `gemini-3.1-flash-lite`. Google does not publish them in the
+docs any more - a key's real limits are shown in AI Studio under **Rate limits**, so check there
+after changing model or tier and set these three accordingly.
+
+The daily count is kept in `data/gemini_usage.json`, not in memory, because every run is a new
+process and an in-memory counter would never reach a daily limit. The file holds one date and one
+number, and resets itself when the date changes. Crossing 50% and 90% of the daily budget prints a
+warning once - not once per run, since the count is read back from the file. Past 100% the pipeline
+keeps going and lets the existing 429 handling deal with it.
+
+Note that this counter resets on the machine's local date, which is not necessarily the moment
+Google resets the quota - treat it as a warning system, not as an authority.
+
 Firecrawl has hard limits of its own that shape the pagination loop: **50 actions** and
 **60 seconds of total wait time** per scrape. Both are budgeted in `fetch_with_pagination()`,
 so a long run silently collects fewer cycles rather than failing the request.
@@ -466,14 +494,17 @@ pip list --outdated
    - Some catalog pages aren't table/grid based - product data or datasheet links live in a different structure (card lists, detail-page links)
    - Extraction logic currently assumes a tabular/grid layout; needs a second mode for link-based pages
 
-3. **Token-based rate limiting**
-   - Track token usage with timestamps (not just a request counter)
-   - If cumulative tokens used in the current rolling window (e.g. last 60s) approach a threshold (e.g. 200k), sleep before the next call instead of relying on retry-after-error alone
-
-4. **Remove the last hardcoded site detail**
+3. **Remove the last hardcoded site detail**
    - `resolve_scripts()` still matches a Texas Instruments label (`"Filter Input"`) by name
    - Everything else in the pipeline is resolved from the page, so this one line is what stops
      the project from being honestly described as site-agnostic
+
+4. **Treat the page's own search box as a filter**
+   - Nearly every catalog carries a free-text search field, and it often reaches values no facet
+     exposes: part fragments, series names, keywords that span several columns
+   - The pipeline only resolves declared filter controls, so that field is currently invisible to it
+   - Offering it as one more filter would give the user a way through pages whose facets are poor,
+     missing, or too coarse - on some sites it is the only control that narrows anything useful
 
 5. **Generalize filter logic**
    - Support more filter types
@@ -490,12 +521,12 @@ pip list --outdated
    - Stricter validation of what comes back
    - Clearer retry logic
 
-7. **Add test coverage**
+8. **Add test coverage**
    - Unit tests for helpers
    - Fixture-based tests with sample HTML
    - Regression tests for known patterns
 
-8. **Reduce hardcoded behavior**
+9. **Reduce hardcoded behavior**
    - Move repeated fixes into reusable abstractions
 
 ### Mid priority

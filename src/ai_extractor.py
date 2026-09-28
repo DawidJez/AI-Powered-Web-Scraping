@@ -13,6 +13,22 @@ from bs4 import BeautifulSoup
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed # maybe used in the future
 from markdownify import markdownify
+from datetime import date
+from pathlib import Path
+
+# gemini-3.1-flash-lite on the free tier - the real numbers for a key are in AI Studio, not in the docs
+REQUESTS_PER_MINUTE = 15
+TOKENS_PER_MINUTE = 250_000
+REQUESTS_PER_DAY = 500
+
+# warn once on the way past each of these shares of the daily budget
+DAILY_WARN_SHARES = (0.5, 0.9)
+
+# the daily count has to outlive the process - every test run is a new one
+DAILY_USAGE_PATH = Path("data/gemini_usage.json")
+
+# close enough to size a request before the model tells us what it really cost
+CHARS_PER_TOKEN = 4
 
 class AIExtractor:
     RETRY_ATTEMPTS = 5
@@ -27,9 +43,86 @@ class AIExtractor:
         """Free-tier Gemini rejects in bursts, so back off long enough for the burst to pass."""
         return self.RETRY_BASE_SECONDS * (2 ** (attempt - 1)) + random.uniform(0, 1)
 
+    def _respect_limits(self, contents) -> None:
+        """
+        A 429 costs a fixed minute of waiting, so it is cheaper to sit out the window than to trip it.
+        The request is sized from the payload because the real cost only comes back with the answer.
+        """
+        estimate = len(str(contents)) // CHARS_PER_TOKEN
+
+        while self._minute_log:
+            now = time.time()
+            self._minute_log = [entry for entry in self._minute_log if now - entry[0] < 60]
+
+            requests_used = len(self._minute_log)
+            tokens_used = sum(entry[1] for entry in self._minute_log)
+
+            if not self._minute_log:
+                return
+
+            if requests_used < REQUESTS_PER_MINUTE and tokens_used + estimate <= TOKENS_PER_MINUTE:
+                return
+
+            waiting = 60 - (now - self._minute_log[0][0]) + 1
+            print(f"WARNING: the per-minute budget is spent ({requests_used}/{REQUESTS_PER_MINUTE} requests, "
+                  f"{tokens_used}/{TOKENS_PER_MINUTE} tokens) - waiting {waiting:.0f}s")
+            time.sleep(waiting)
+
+    def _count_daily_request(self) -> None:
+        """
+        The daily budget is the one that ends a working day, and a counter held in memory would
+        never reach it - each test run is its own process. The file is what carries it across them.
+        """
+        today = date.today().isoformat()
+        used = 0
+
+        try:
+            stored = json.loads(DAILY_USAGE_PATH.read_text(encoding="utf-8"))
+            if stored.get("date") == today:
+                used = int(stored.get("requests", 0))
+        except (OSError, ValueError, AttributeError):
+            pass
+
+        used += 1
+
+        try:
+            DAILY_USAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            DAILY_USAGE_PATH.write_text(json.dumps({"date": today, "requests": used}), encoding="utf-8")
+        except OSError as e:
+            self._debug(f"DEBUG: could not write the daily usage file ({e})")
+
+        for share in DAILY_WARN_SHARES:
+            crossing = REQUESTS_PER_DAY * share
+
+            # the count comes from the file, so each share is announced once a day and not once a run
+            if used - 1 < crossing <= used:
+                print(f"WARNING: {share:.0%} of the daily Gemini request budget used "
+                      f"({used}/{REQUESTS_PER_DAY})")
+
+    def _record_usage(self, metadata) -> None:
+        total = getattr(metadata, "total_token_count", None) or 0
+
+        self.tokens_usage.append({
+            "prompt_tokens": getattr(metadata, "prompt_token_count", None),
+            "output_tokens": getattr(metadata, "candidates_token_count", None),
+            "total_tokens": total
+        })
+
+        self._minute_log.append((time.time(), total))
+        self._count_daily_request()
+
+    def _generate(self, **kwargs):
+        """One door for every model call - a budget only holds if nothing slips past it."""
+        self._respect_limits(kwargs.get("contents"))
+        response = self.client.models.generate_content(**kwargs)
+        self._record_usage(response.usage_metadata)
+
+        return response
+
     def __init__(self, api_key: str | None = None, debug: bool = False):
         self.client = genai.Client(api_key=api_key or os.getenv("GEMINI_API_KEY"))
         self.tokens_usage: list[dict] = []
+        self._minute_log: list[tuple[float, int]] = []
         self.model: str = "gemini-3.1-flash-lite"
         # DEBUG INFO: use model: "gemini-flash-latest"/"gemini-2.5-flash"/"gemini-2.5-flash-lite" 
         # after "gemini-3.1-flash-lite" is burnt out of tokens
@@ -145,7 +238,7 @@ class AIExtractor:
 
         for attempt in range(1, max_retries + 1):
             try:
-                response = self.client.models.generate_content(
+                response = self._generate(
                     model=self.model,
                     contents=[f"Content:\n{markdown_content[:3000]}"],
                     config=types.GenerateContentConfig(
@@ -254,7 +347,7 @@ class AIExtractor:
         # it is told that free gemini api version is more susceptible for server errors
         for attempt in range(1, max_retries + 1):
             try:
-                response = self.client.models.generate_content(
+                response = self._generate(
                     model=self.model,
                     contents=[f"fields_instruction (canonical JSON keys - see Field naming contract):\n{fields_instruction}\n\nSearching for: {user_prompt}\n\nContent:\n{markdown_content}"],
                     config=types.GenerateContentConfig(
@@ -262,14 +355,6 @@ class AIExtractor:
                         response_mime_type="application/json"
                     )
                 )
-                metadata = response.usage_metadata
-
-                self.tokens_usage.append({
-                    "prompt_tokens": metadata.prompt_token_count,
-                    "output_tokens": metadata.candidates_token_count,
-                    "total_tokens": metadata.total_token_count
-                })
-                
                 break
             
             except errors.ServerError as e:
@@ -473,7 +558,7 @@ class AIExtractor:
         for attempt in range(1, max_retries + 1):
 
             try:
-                response = self.client.models.generate_content(
+                response = self._generate(
                     model=self.model,
                     contents=[f"Content:\n{content}"],
                     config=types.GenerateContentConfig(
@@ -481,14 +566,6 @@ class AIExtractor:
                         response_mime_type="application/json"
                     )
                 )
-
-                metadata = response.usage_metadata
-
-                self.tokens_usage.append({
-                    "prompt_tokens": metadata.prompt_token_count,
-                    "output_tokens": metadata.candidates_token_count,
-                    "total_tokens": metadata.total_token_count
-                })
                 break
 
             except errors.ServerError as e:
@@ -695,7 +772,7 @@ class AIExtractor:
         response = None
         for attempt in range(1, max_retries + 1):
             try:
-                response = self.client.models.generate_content(
+                response = self._generate(
                     model=self.model,
                     contents=[f"Target label: {search_terms}\n\nHTML fragment:\n{combined_windows}"],
                     config=types.GenerateContentConfig(
@@ -703,13 +780,6 @@ class AIExtractor:
                         response_mime_type="application/json"
                     )
                 )
-                
-                metadata = response.usage_metadata
-                self.tokens_usage.append({
-                    "prompt_tokens": metadata.prompt_token_count,
-                    "output_tokens": metadata.candidates_token_count,
-                    "total_tokens": metadata.total_token_count
-                })
                 parsed = self._json_object(response.text, None)
 
                 # a truncated reply is as retryable as a 503 - the model rarely cuts off twice in a row
@@ -781,7 +851,7 @@ class AIExtractor:
         response = None
         for attempt in range(1, max_retries + 1):
             try:
-                response = self.client.models.generate_content(
+                response = self._generate(
                     model=self.model,
                     contents=[f"HTML fragments:\n{combined_windows}"],
                     config=types.GenerateContentConfig(
@@ -789,13 +859,6 @@ class AIExtractor:
                         response_mime_type="application/json"
                     )
                 )
-
-                metadata = response.usage_metadata
-                self.tokens_usage.append({
-                    "prompt_tokens": metadata.prompt_token_count,
-                    "output_tokens": metadata.candidates_token_count,
-                    "total_tokens": metadata.total_token_count
-                })
                 break
 
             except errors.ServerError as e:
@@ -1027,7 +1090,7 @@ class AIExtractor:
         result = None
         for attempt in range(1, max_retries + 1):
             try:
-                response = self.client.models.generate_content(
+                response = self._generate(
                     model=self.model,
                     contents=[
                         f"Target label (the first is the search_term and the others are help phrases): {search_terms}\n\n"
@@ -1039,14 +1102,6 @@ class AIExtractor:
                         response_mime_type="application/json"
                     )
                 )
-                
-                metadata = response.usage_metadata
-                self.tokens_usage.append({
-                    "prompt_tokens": metadata.prompt_token_count,
-                    "output_tokens": metadata.candidates_token_count,
-                    "total_tokens": metadata.total_token_count
-                })
-
                 parsed = self._json_object(response.text, None)
 
                 # a truncated reply is as retryable as a 503 - the model rarely cuts off twice in a row
@@ -1215,7 +1270,7 @@ class AIExtractor:
         response = None
         for attempt in range(1, max_retries + 1):
             try:
-                response = self.client.models.generate_content(
+                response = self._generate(
                     model=self.model,
                     contents=f"URL of the page: {url}, HTML fragments: {combined_windows}, page sample to check type of pagination: {page_probe}",
                     config=types.GenerateContentConfig(
@@ -1223,13 +1278,6 @@ class AIExtractor:
                         response_mime_type="application/json"
                     )
                 )
-
-                metadata = response.usage_metadata
-                self.tokens_usage.append({
-                    "prompt_tokens": metadata.prompt_token_count,
-                    "output_tokens": metadata.candidates_token_count,
-                    "total_tokens": metadata.total_token_count
-                })
                 break
 
             except errors.ServerError as e:
