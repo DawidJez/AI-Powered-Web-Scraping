@@ -105,6 +105,41 @@ class FirecrawlClient:
             "return 'apply clicked, candidates=' + all.length + ', reach=' + ranked[0].reach; })();"
         )
 
+    NUMBERED_TARGET = re.compile(r"\[\s*([\w-]+)\s*=\s*(['\"])(\d+)\2\s*\]")
+
+    def _advancing_next_script(self, script: str) -> str:
+        """
+        A next-page control picked by an attribute holding a page number stops working after the
+        first click - that number belongs to the page we were on, and one page later the same
+        selector lands on the current page's own button, which is disabled. So read the page the
+        grid says it is on and take the one after it, falling back to counting the clicks.
+        """
+        match = self.NUMBERED_TARGET.search((script or "").split(".click(")[0])
+
+        if not match:
+            return script
+
+        attribute = json.dumps(match.group(1))
+        start = int(match.group(3))
+        original = json.dumps(script)
+
+        return (
+            "(function() { const attr = " + attribute + ", start = " + str(start) + "; "
+            "const all = [...document.querySelectorAll('[' + attr + ']')]; "
+            "if (!all.length) { return (0, eval)(" + original + "); } "
+            "const page = (el) => parseInt(el.getAttribute(attr), 10); "
+            "const marked = '[data-current=\"true\"], [aria-current]:not([aria-current=\"false\"]), "
+            "[aria-selected=\"true\"], .is-currentpage, .is-current, .current, .active, .is-active'; "
+            "const current = all.find(el => el.matches(marked) || (el.disabled && /^[0-9]+$/.test(el.textContent.trim()))); "
+            "let wanted; "
+            "if (current && !isNaN(page(current))) { wanted = page(current) + 1; } "
+            "else { window.__nextPageStep = (window.__nextPageStep || 0) + 1; wanted = start + window.__nextPageStep - 1; } "
+            "const target = all.find(el => page(el) === wanted && el !== current && !el.disabled); "
+            "if (!target) { return 'no control for ' + attr + '=' + wanted; } "
+            "target.click(); "
+            "return 'paged to ' + attr + '=' + wanted; })();"
+        )
+
     def _report_script_errors(self, result) -> None:
         """A guarded script that blew up answers with its message instead of crashing - say so."""
         returns = (getattr(result, "actions", None) or {}).get("javascriptReturns") or []
@@ -515,7 +550,7 @@ class FirecrawlClient:
                 disabled_js_indices.append(js_index)
                 js_index += 1
 
-            actions.append({"type": "executeJavascript", "script": self._safe_script(pagination_script)})
+            actions.append({"type": "executeJavascript", "script": self._safe_script(self._advancing_next_script(pagination_script))})
             js_index += 1
 
             actions.append({"type": "wait", "milliseconds": PAGINATION_WAIT_MS})
@@ -552,7 +587,7 @@ class FirecrawlClient:
         # an identical page means the click changed nothing in time - that page is simply lost
         if len(pages) < len(raw_scrapes):
             print(f"WARNING: {len(raw_scrapes) - len(pages)} paginated page(s) came back unchanged and were dropped - "
-                  f"the grid was probably still refreshing after {PAGINATION_WAIT_MS}ms")
+                  f"the next-page click did not advance, or the grid was still refreshing after {PAGINATION_WAIT_MS}ms")
 
         stop_at = None
         if disabled_check_script:
