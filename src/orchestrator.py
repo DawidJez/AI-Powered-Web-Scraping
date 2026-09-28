@@ -14,9 +14,10 @@ from excel_exporter import ExcelExporter
 from pdf_downloader import PDFDownloader
 
 class Orchestrator:
-    def __init__(self):
-        self.extractor = AIExtractor()
-        self.firecrawl = FirecrawlClient()
+    def __init__(self, debug: bool = False):
+        self.debug = debug
+        self.extractor = AIExtractor(debug=debug)
+        self.firecrawl = FirecrawlClient(debug=debug)
         self.excel = ExcelExporter()
         self.pdf = PDFDownloader()
         self.unread_pages = 0
@@ -888,12 +889,15 @@ class Orchestrator:
 
     def run_debug(self, url: str, user_prompt: str, user_filter_choice: list, user_csv_list: list, output_path: str, download_pdfs: bool = False, filters: list[dict] | None = None):
 
-        # the action dumps and the pagination json are wanted here, and nowhere else
-        self.firecrawl.debug = True
         """
         Almost same as run(), but with debug prints and timing at every stage - use during
         development/testing to see what's happening at each step.
         """
+
+        # the action dumps and the model chatter are wanted here, and nowhere else
+        self.debug = True
+        self.firecrawl.debug = True
+        self.extractor.debug = True
         start_test = time.time()
         print("DEBUG: Start of the test")
 

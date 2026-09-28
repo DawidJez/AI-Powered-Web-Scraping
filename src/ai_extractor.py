@@ -18,16 +18,22 @@ class AIExtractor:
     RETRY_ATTEMPTS = 5
     RETRY_BASE_SECONDS = 4
 
+    def _debug(self, message: str) -> None:
+        """Response dumps and retry chatter are for chasing a problem, not for every production run."""
+        if self.debug:
+            print(message)
+
     def _backoff(self, attempt: int) -> float:
         """Free-tier Gemini rejects in bursts, so back off long enough for the burst to pass."""
         return self.RETRY_BASE_SECONDS * (2 ** (attempt - 1)) + random.uniform(0, 1)
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None, debug: bool = False):
         self.client = genai.Client(api_key=api_key or os.getenv("GEMINI_API_KEY"))
         self.tokens_usage: list[dict] = []
         self.model: str = "gemini-3.1-flash-lite"
         # DEBUG INFO: use model: "gemini-flash-latest"/"gemini-2.5-flash"/"gemini-2.5-flash-lite" 
         # after "gemini-3.1-flash-lite" is burnt out of tokens
+        self.debug = debug
 
     def _window_score(self, fragment: str) -> int:
         """
@@ -105,7 +111,7 @@ class AIExtractor:
         try:
             parsed = json.loads(response_text)
         except json.JSONDecodeError:
-            print(f"DEBUG: failed to parse the response: {response_text[:300]}")
+            self._debug(f"DEBUG: failed to parse the response: {response_text[:300]}")
             return fallback
 
         # the model sometimes wraps the object in a JSON array
@@ -113,7 +119,7 @@ class AIExtractor:
             parsed = next((p for p in parsed if isinstance(p, dict)), None)
 
         if not isinstance(parsed, dict):
-            print(f"DEBUG: unexpected response shape: {response_text[:300]}")
+            self._debug(f"DEBUG: unexpected response shape: {response_text[:300]}")
             return fallback
 
         return parsed
@@ -150,7 +156,7 @@ class AIExtractor:
                 parsed = json.loads(response.text)
                 return parsed.get("total_records_declared")
             except (errors.ServerError, errors.ClientError, json.JSONDecodeError) as e:
-                print(f"DEBUG: total_records detection failed (attempt {attempt}): {e}")
+                self._debug(f"DEBUG: total_records detection failed (attempt {attempt}): {e}")
                 if attempt == max_retries:
                     return None
                 time.sleep(self._backoff(attempt))
@@ -268,10 +274,10 @@ class AIExtractor:
             
             except errors.ServerError as e:
                 wait = self._backoff(attempt)
-                print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait}s")
+                self._debug(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait}s")
 
                 if attempt == max_retries:
-                    print("DEBUG: attempts exhausted, returning an empty result")
+                    print("WARNING: the model never answered for this page - returning an empty result")
                     return {"records": [], "filtered_page_count": None, "total_records_declared": None, "unavailable": True}
 
                 time.sleep(wait)
@@ -279,7 +285,7 @@ class AIExtractor:
             except errors.ClientError as e:
                 if getattr(e, "code", None) == 429 or "RESOURCE_EXHAUSTED" in str(e):
                     wait = 60
-                    print(f"DEBUG: 429 RESOURCE_EXHAUSTED, retry {attempt}/{max_retries} in {wait}s")
+                    self._debug(f"DEBUG: 429 RESOURCE_EXHAUSTED, retry {attempt}/{max_retries} in {wait}s")
                     if attempt == max_retries:
                         return {"records": [], "filtered_page_count": None, "total_records_declared": None, "unavailable": True}
                     time.sleep(wait)
@@ -290,16 +296,16 @@ class AIExtractor:
             parsed = json.loads(response.text)
         except json.JSONDecodeError:
             if attempt == max_retries:
-                print(f"Failed attempts: {max_retries} for parsing JSON")
+                print(f"WARNING: could not parse the model's JSON after {max_retries} attempts - returning an empty result")
                 return {"records": [], "filtered_page_count": None, "total_records_declared": None, "unavailable": True}
-            print(f"DEBUG: failed to parse JSON response: {response.text[:300]!r}")
+            self._debug(f"DEBUG: failed to parse JSON response: {response.text[:300]!r}")
             return {"records": [], "filtered_page_count": None, "total_records_declared": None, "unavailable": True}
 
         if not isinstance(parsed, dict) or "records" not in parsed:
-            print(f"DEBUG: model returned wrong format (attempt {attempt}/{max_retries}), expected dict with 'records', got: {type(parsed)}")
+            self._debug(f"DEBUG: model returned wrong format (attempt {attempt}/{max_retries}), expected dict with 'records', got: {type(parsed)}")
 
             if attempt == max_retries:
-                print("DEBUG: attempts exhausted, returning empty result")
+                print("WARNING: the model kept answering in the wrong shape - returning an empty result")
 
                 return {"records": [], "filtered_page_count": None, "total_records_declared": None, "unavailable": True}
 
@@ -488,7 +494,7 @@ class AIExtractor:
             except errors.ServerError as e:
                 wait_time = self._backoff(attempt)
 
-                print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
+                self._debug(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
                 # nothing downstream works without the page probe, so stop here instead of
                 # letting an empty result surface later as a filter problem
                 if attempt == max_retries:
@@ -503,9 +509,7 @@ class AIExtractor:
         
 
     def analize_html(self, html: str, search_terms: list, max_retries: int = RETRY_ATTEMPTS):
-        #print(search_terms)
         search_terms = [s for s in search_terms if s and s.strip()]
-        #print(f"html: {len(html)} i search_terms ({len(search_terms)}): {search_terms}")
         
         html_windows = self._extract_html_windows(html, search_terms)
 
@@ -711,7 +715,7 @@ class AIExtractor:
                 # a truncated reply is as retryable as a 503 - the model rarely cuts off twice in a row
                 if parsed is None and attempt < max_retries:
                     wait_time = self._backoff(attempt)
-                    print(f"DEBUG: unusable response, retry {attempt}/{max_retries} in {wait_time}s")
+                    self._debug(f"DEBUG: unusable response, retry {attempt}/{max_retries} in {wait_time}s")
                     time.sleep(wait_time)
                     continue
 
@@ -720,9 +724,9 @@ class AIExtractor:
             except errors.ServerError as e:
                 wait_time = self._backoff(attempt)
 
-                print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
+                self._debug(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
                 if attempt == max_retries:
-                    print("DEBUG: The number of attempts has been exhausted; an empty response is returned.")
+                    print("WARNING: the model never answered - returning an empty response")
                     return {}
                 
                 time.sleep(wait_time)
@@ -796,7 +800,7 @@ class AIExtractor:
 
             except errors.ServerError as e:
                 wait_time = self._backoff(attempt)
-                print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
+                self._debug(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
                 if attempt == max_retries:
                     return {"apply_script": None, "confidence": "none", "evidence": "attempts exhausted"}
                 time.sleep(wait_time)
@@ -1048,7 +1052,7 @@ class AIExtractor:
                 # a truncated reply is as retryable as a 503 - the model rarely cuts off twice in a row
                 if parsed is None and attempt < max_retries:
                     wait_time = self._backoff(attempt)
-                    print(f"DEBUG: unusable response, retry {attempt}/{max_retries} in {wait_time}s")
+                    self._debug(f"DEBUG: unusable response, retry {attempt}/{max_retries} in {wait_time}s")
                     time.sleep(wait_time)
                     continue
 
@@ -1058,9 +1062,9 @@ class AIExtractor:
             except errors.ServerError as e:
                 wait_time = self._backoff(attempt)
 
-                print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
+                self._debug(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
                 if attempt == max_retries:
-                    print("DEBUG: The number of attempts has been exhausted; an empty response is returned.")
+                    print("WARNING: the model never answered - returning an empty response")
                     return None
                 
                 time.sleep(wait_time)
@@ -1068,7 +1072,7 @@ class AIExtractor:
             except errors.ClientError as e:
                 if getattr(e, "code", None) == 429 or "RESOURCE_EXHAUSTED" in str(e):
                     wait_time = 60
-                    print(f"DEBUG: 429 RESOURCE_EXHAUSTED, retry {attempt}/{max_retries} in {wait_time}s")
+                    self._debug(f"DEBUG: 429 RESOURCE_EXHAUSTED, retry {attempt}/{max_retries} in {wait_time}s")
                     if attempt == max_retries:
                         return None
                     time.sleep(wait_time)
@@ -1222,9 +1226,9 @@ class AIExtractor:
             except errors.ServerError as e:
                 wait_time = self._backoff(attempt)
 
-                print(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
+                self._debug(f"DEBUG: ServerError ({e}), retry {attempt}/{max_retries} in {wait_time}s")
                 if attempt == max_retries:
-                    print("DEBUG: The number of attempts has been exhausted; an empty response is returned.")
+                    print("WARNING: the model never answered - returning an empty response")
                     return {}
                 
                 time.sleep(wait_time)
@@ -1232,7 +1236,7 @@ class AIExtractor:
             except errors.ClientError as e:
                 if getattr(e, "code", None) == 429 or "RESOURCE_EXHAUSTED" in str(e):
                     wait_time = 60
-                    print(f"DEBUG: 429 RESOURCE_EXHAUSTED, retry {attempt}/{max_retries} in {wait_time}s")
+                    self._debug(f"DEBUG: 429 RESOURCE_EXHAUSTED, retry {attempt}/{max_retries} in {wait_time}s")
                     if attempt == max_retries:
                         return None
                     time.sleep(wait_time)
