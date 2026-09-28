@@ -16,6 +16,9 @@ EXCLUSIVE_INTERACTIONS = {"click_option", "select_dropdown"}
 # the slowest grid we scrape refreshes over AJAX - scraping too early returns the previous page
 PAGINATION_WAIT_MS = 6000
 
+# a scrape is rejected outright when the waits add up past a minute - the clock is a budget like the action count
+MAX_WAIT_MS = 60000
+
 class FirecrawlClient:
 
     def __init__(self, api_key: str | None = None, debug: bool = False):
@@ -65,7 +68,9 @@ class FirecrawlClient:
             script,
         )
 
-    VALUE_ASSIGNMENT = re.compile(r"([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.value\s*=(?!=)\s*([^;]+);")
+    VALUE_ASSIGNMENT = re.compile(
+        r"([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\((?:[^()'\"]|'[^']*'|\"[^\"]*\")*\))*)\.value\s*=(?!=)\s*([^;]+);"
+    )
     NATIVE_SETTER = (
         r"(function(el, v) { const proto = Object.getPrototypeOf(el); "
         r"const found = Object.getOwnPropertyDescriptor(proto, 'value'); "
@@ -114,10 +119,13 @@ class FirecrawlClient:
         selector lands on the current page's own button, which is disabled. So read the page the
         grid says it is on and take the one after it, falling back to counting the clicks.
         """
-        match = self.NUMBERED_TARGET.search((script or "").split(".click(")[0])
+        # the clicked element is described by the last selector before the click, not by the first one
+        found = list(self.NUMBERED_TARGET.finditer((script or "").split(".click(")[0]))
 
-        if not match:
+        if not found:
             return script
+
+        match = found[-1]
 
         attribute = json.dumps(match.group(1))
         start = int(match.group(3))
@@ -534,6 +542,10 @@ class FirecrawlClient:
         available_budget = MAX_ACTIONS - len(actions) - SAFETY_MARGIN
         max_cycles = max(0, available_budget // actions_per_cycle)
         max_cycles = min(max_cycles, page_count - 1) if page_count else max_cycles
+
+        spent_wait = wait_for + sum(a.get("milliseconds", 0) for a in actions if a["type"] == "wait")
+        wait_budget = MAX_WAIT_MS - spent_wait - PAGINATION_WAIT_MS
+        max_cycles = min(max_cycles, max(0, wait_budget // PAGINATION_WAIT_MS))
 
         # the first page is already in hand - with nothing left to page through there is nothing to scrape
         if max_cycles == 0:
