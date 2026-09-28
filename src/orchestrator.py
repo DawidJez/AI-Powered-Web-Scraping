@@ -19,6 +19,7 @@ class Orchestrator:
         self.firecrawl = FirecrawlClient()
         self.excel = ExcelExporter()
         self.pdf = PDFDownloader()
+        self.unread_pages = 0
 
     def page_sample(self, url: str) -> dict:
         """ Fetches a single/first page from url and asks AI
@@ -550,12 +551,15 @@ class Orchestrator:
         if available_fields is None:
             available_fields = []
 
+        # pages the model never answered for - counted so a partial result cannot pass as a full one
+        self.unread_pages = 0
         all_results = []
         data = filtered_data.get("filtered_data")
         filters_applied = bool(filtered_data.get("resolved_scripts"))
 
         for page_data in data:
             extracted = self.extractor.extract(page_data, user_prompt, available_fields)
+            self._count_unread(extracted, "the filtered page")
 
             # still the whole catalog after filtering - the filter never took effect, and
             # paginating it would scrape the entire site once per value
@@ -584,12 +588,21 @@ class Orchestrator:
                 exclusive_value = page_data.get("exclusive_value") if isinstance(page_data, dict) else None
                 new_html_pages = self.firecrawl.fetch_with_pagination(url, filtered_data.get("resolved_scripts"), resolved_pagination, page_count, identifier_value, exclusive_value)
 
-                for page_html in new_html_pages:
+                for number, page_html in enumerate(new_html_pages, start=2):
                     extracted_more = self.extractor.extract(page_html, user_prompt, available_fields)
+                    self._count_unread(extracted_more, f"paginated page {number}")
                     all_results.append(extracted_more.get("records", []))
 
         return all_results
 
+
+    def _count_unread(self, extracted: dict, where: str) -> None:
+        """An unanswered page looks exactly like an empty one - say so, or a partial run passes as complete."""
+        if not extracted.get("unavailable"):
+            return
+
+        self.unread_pages += 1
+        print(f"WARNING: {where} could not be read - the model gave up on it, its records are missing from the result")
 
     def _is_distinctive_value(self, value: str) -> bool:
         """
@@ -862,6 +875,11 @@ class Orchestrator:
             return
 
         self.excel.save(flat_all_results, output_path)
+
+        if self.unread_pages:
+            print(f"WARNING: the result is incomplete - {self.unread_pages} page(s) could not be read, "
+                  f"their records are missing. Re-run when the model is available again.")
+
         print(f"Saved {len(flat_all_results)} records to: {output_path}")
 
         if download_pdfs and ("Full URL of the PDF datasheet" not in user_prompt or "MPN" not in user_prompt):
@@ -880,6 +898,7 @@ class Orchestrator:
         return {
             "output_path": output_path,
             "record_count": len(flat_all_results),
+            "unread_pages": self.unread_pages,
             "records": flat_all_results
         }
 
@@ -887,6 +906,9 @@ class Orchestrator:
     
 
     def run_debug(self, url: str, user_prompt: str, user_filter_choice: list, user_csv_list: list, output_path: str, download_pdfs: bool = False, filters: list[dict] | None = None):
+
+        # the action dumps and the pagination json are wanted here, and nowhere else
+        self.firecrawl.debug = True
         """
         Almost same as run(), but with debug prints and timing at every stage - use during
         development/testing to see what's happening at each step.
@@ -950,6 +972,10 @@ class Orchestrator:
         flat_all_results = self._dedupe_records(flat_all_results)
         print(f"flat_all_results (length): {len(flat_all_results)} (dropped {before_dedupe - len(flat_all_results)} duplicates)\n")
 
+        if self.unread_pages:
+            print(f"WARNING: the result is incomplete - {self.unread_pages} page(s) could not be read, "
+                  f"their records are missing. Re-run when the model is available again.\n")
+
         if not flat_all_results:
             raise ValueError("No records to save - check the filter/field/URL")
 
@@ -979,5 +1005,6 @@ class Orchestrator:
         return {
             "output_path": output_path,
             "record_count": len(flat_all_results),
+            "unread_pages": self.unread_pages,
             "records": flat_all_results
         }

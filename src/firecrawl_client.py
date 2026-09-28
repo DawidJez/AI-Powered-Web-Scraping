@@ -322,21 +322,6 @@ class FirecrawlClient:
         return [{"type": "wait", "milliseconds": 700}]
 
 
-    def _build_multi_filter_actions(self, resolved_filters: list[dict], selected_values: list[str]) -> list:
-        """
-        Build one combined action sequence for several filters in order.
-        This mirrors the old single-filter behavior for each filter while keeping all
-        actions in one scrape request.
-        """
-        if len(resolved_filters) != len(selected_values):
-            raise ValueError("resolved_filters and selected_values must have the same length")
-
-        actions = []
-        for resolved, selected_value in zip(resolved_filters, selected_values):
-            actions.extend(self._build_actions_for_filter(resolved, selected_value))
-        return actions
-
-    # helper for dropdown selectors cuz ai is messing with it
     def _build_select_script(select_selector: str, option_value: str) -> str:
         return f"""
             const select = document.querySelector('{select_selector}');
@@ -487,41 +472,6 @@ class FirecrawlClient:
             results.append(self._run_fetch(url, category_actions, extra, apply_actions, self._label_for(category_entries, value), value))
         return results
 
-    def fetch_multi_filtered_data(self, url: str, resolved_filters: list[dict], selected_values: list[str], apply_script: str = None, wait_for: int = 3000) -> dict:
-        """
-        Execute a single scrape that applies multiple filters in order using
-        the combined action sequence built by `_build_multi_filter_actions`.
-        """
-        actions = self._build_multi_filter_actions(resolved_filters, selected_values)
-
-        if apply_script:
-            actions.append({"type": "executeJavascript", "script": self._safe_script(self._scoped_apply_script(apply_script))})
-            actions.append({"type": "wait", "milliseconds": 1500})
-        else:
-            actions.append({"type": "wait", "milliseconds": 700})
-
-        self._debug(f"DEBUG: actions: {actions}")
-
-        result = self.app.scrape_url(
-            url=url,
-            formats=['markdown', 'links'],
-            wait_for=wait_for,
-            actions=actions,
-            proxy="auto"
-        )
-
-        self._report_script_errors(result)
-
-        separator = ", "
-        joined = separator.join(selected_values)
-
-        return {
-            "markdown": result.markdown,
-            "links": result.links,
-            "metadata": result.metadata,
-            "item": joined
-        }
-    
     def fetch_with_given_actions(self, url: str, actions: list, wait_for: int = 3000):
         # scripts come in from the outside here too, so they get the same crash guard
         actions = [

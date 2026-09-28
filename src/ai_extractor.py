@@ -283,7 +283,7 @@ class AIExtractor:
 
                 if attempt == max_retries:
                     print("DEBUG: attempts exhausted, returning an empty result")
-                    return {"records": [], "filtered_page_count": None, "total_records_declared": None}
+                    return {"records": [], "filtered_page_count": None, "total_records_declared": None, "unavailable": True}
 
                 time.sleep(wait)
 
@@ -292,7 +292,7 @@ class AIExtractor:
                     wait = 60
                     print(f"DEBUG: 429 RESOURCE_EXHAUSTED, retry {attempt}/{max_retries} in {wait}s")
                     if attempt == max_retries:
-                        return {"records": [], "filtered_page_count": None, "total_records_declared": None}
+                        return {"records": [], "filtered_page_count": None, "total_records_declared": None, "unavailable": True}
                     time.sleep(wait)
                     continue
                 raise
@@ -302,9 +302,9 @@ class AIExtractor:
         except json.JSONDecodeError:
             if attempt == max_retries:
                 print(f"Failed attempts: {max_retries} for parsing JSON")
-                return {"records": [], "filtered_page_count": None, "total_records_declared": None}
+                return {"records": [], "filtered_page_count": None, "total_records_declared": None, "unavailable": True}
             print(f"DEBUG: failed to parse JSON response: {response.text[:300]!r}")
-            return {"records": [], "filtered_page_count": None, "total_records_declared": None}
+            return {"records": [], "filtered_page_count": None, "total_records_declared": None, "unavailable": True}
 
         if not isinstance(parsed, dict) or "records" not in parsed:
             print(f"DEBUG: model returned wrong format (attempt {attempt}/{max_retries}), expected dict with 'records', got: {type(parsed)}")
@@ -312,7 +312,7 @@ class AIExtractor:
             if attempt == max_retries:
                 print("DEBUG: attempts exhausted, returning empty result")
 
-                return {"records": [], "filtered_page_count": None, "total_records_declared": None}
+                return {"records": [], "filtered_page_count": None, "total_records_declared": None, "unavailable": True}
 
         return parsed
         
@@ -335,7 +335,7 @@ class AIExtractor:
 
         # every failure path is supposed to answer with the empty result shape - don't trust it blindly
         if not isinstance(result, dict):
-            result = {"records": [], "filtered_page_count": None, "total_records_declared": None}
+            result = {"records": [], "filtered_page_count": None, "total_records_declared": None, "unavailable": True}
 
         records = self._deduplicate(result.get("records", []))
         page_count = result.get("filtered_page_count")
@@ -351,7 +351,9 @@ class AIExtractor:
             "records": records,
             "paging_needed": bool(page_count and page_count > 1),
             "page_count": page_count,
-            "total_records_declared": result.get("total_records_declared")
+            "total_records_declared": result.get("total_records_declared"),
+            # the model never answered for this page - empty here does not mean "no matches"
+            "unavailable": bool(result.get("unavailable"))
         }
 
     def suggestion(self, content: str, max_retries: int = RETRY_ATTEMPTS):
@@ -814,48 +816,6 @@ class AIExtractor:
 
     # debug func when testing filtereing and scrpping the data
     # ai returns only list of found profucts and some short analisys
-    def debug_ask_ai_about_products(self, firecrawl_result: dict):
-
-        prompt = f"""
-            Masz ponizej surowy markdown wygenerowany ze scrapowania strony
-            (moze byc pozlepiany, bez spacji, chaotyczny - to normalne po
-            automatycznym scrapowaniu, nie przejmuj sie formatowaniem).
-
-            To jest test/debug, nie potrzebuje structured JSON. Po prostu
-            powiedz mi luznym tekstem:
-
-            1. Czy widzisz tu liste produktow / product numberow? Ile ich
-            widac w tym fragmencie?
-            2. Wypisz WSZYSTKIE product number / kody produktow ktore
-            znajdziesz (nawet jesli sa pozlepiane z innym tekstem bez spacji -
-            wypisz je oddzielnie mimo to).
-            3. Czy widzisz cokolwiek co wyglada na filtr po ktorym tekst
-            zostal juz przefiltrowany (np. wpisana fraza w polu wyszukiwania,
-            ktora ograniczyla liste)?
-            4. Czy cos wyglada podejrzanie / ucietego / zepsutego w tym
-            markdownie?
-
-            Content:
-            ---
-            {firecrawl_result}
-            ---
-        """
-
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=[f"Prompt:\n{prompt}"],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json"
-            )
-        )
-
-        print("=" * 60)
-        print("DEBUG: AI response:")
-        print("=" * 60)
-        print(response.text)
-
-        return response.text
-    
     def find_script(self, scripts: list, filter: dict, html: str, apply_script: str = None, max_retries: int = RETRY_ATTEMPTS) -> dict:
         """we take the filter["name"] so llm will know what its actually looking for"""
 
