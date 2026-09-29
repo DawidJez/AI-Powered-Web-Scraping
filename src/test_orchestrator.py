@@ -107,7 +107,7 @@ TEST_CONFIGS = {
         "output_path": "data/excel/output_test_5.xlsx"
     },
     "6": {
-        "label": "Multi-filter test (template) Samtec",
+        "label": "Samtec - Multi-filter test",
         "url": "https://www.samtec.com/products/cle?_gl=1*1dsoqeg*_up*MQ..*_ga*NjM0OTQ5ODc4LjE3ODk2NDA1Mjg.*_ga_3KFNZC07WW*czE3ODk2NDA1MjckbzEkZzEkdDE3ODk2NDA2NDAkajckbDAkaDE3MjE2MTYxNzg.",
         "user_prompt": SAMTEC_PROMPT,
         "filters": [],
@@ -138,7 +138,7 @@ TEST_CONFIGS = {
         "output_path": "data/excel/output_test_9.xlsx"
     },
     "10": {
-        "label": "Molex2 - Multi-filter test (template)",
+        "label": "Molex2 - Multi-filter test",
         "url": "https://www.molex.com/en-us/part-list/connectors",
         "user_prompt": GENERIC_PROMPT,
         "filters": [

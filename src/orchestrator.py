@@ -118,9 +118,37 @@ class Orchestrator:
         return True
 
     # the quote style has to be matched by a backreference - selectors often carry the other kind inside
-    SCRIPT_SELECTOR = re.compile(r"querySelector(?:All)?\(\s*(['\"])(.+?)\1\s*\)")
+    SCRIPT_TARGET = re.compile(r"(querySelector(?:All)?|getElementById)\(\s*(['\"])(.+?)\2\s*\)")
     SCRIPT_TEXT = re.compile(r"includes\(\s*(['\"])(.+?)\1\s*\)")
     COLUMN_ATTRIBUTES = ("aria-colindex", "col-id", "data-colindex", "data-field")
+
+    def _selectors_in_script(self, script: str | None) -> list[str]:
+        """Every element the script looks up, in the order it looks them up."""
+        return [
+            "#" + match.group(3) if match.group(1) == "getElementById" else match.group(3)
+            for match in self.SCRIPT_TARGET.finditer(script or "")
+        ]
+
+    def _script_targets_disabled(self, html: str | None, script: str | None, name: str = "") -> bool:
+        """
+        Grids ship one filter input per column and leave them disabled until the column menu
+        opens - typing into one fails without a sound, so it is no control at all.
+        """
+        if not script or not html:
+            return False
+
+        for selector in self._selectors_in_script(script):
+
+            # a bare tag name asks about every such element on the page, and the answer says
+            # nothing about the one control the script means
+            if not any(mark in selector for mark in "#.["):
+                continue
+
+            if self._is_disabled_in_html(html, selector):
+                print(f"DEBUG: '{name}' - the script targets a disabled control ({selector}), digging deeper")
+                return True
+
+        return False
 
     def _repair_gate_selector(self, analisys: dict, html: str, name: str) -> str | None:
         """
@@ -133,7 +161,7 @@ class Orchestrator:
 
         # the control itself is the last part of the selector, and the last one the script looks up
         targets = [part for part in [self._last_compound(selector)] if part]
-        targets += [m.group(2) for m in self.SCRIPT_SELECTOR.finditer(script)][-1:]
+        targets += self._selectors_in_script(script)[-1:]
 
         if not targets or not html:
             return None
@@ -258,20 +286,15 @@ class Orchestrator:
 
         return all(el.has_attr("disabled") or el.get("aria-disabled") == "true" for el in found)
 
-    def resolve_scripts(self, url: str, analisys: dict, filter: dict, max_depth: int = 5) -> list:
+    def resolve_scripts(self, url: str, analisys: dict, filter: dict, html: str | None = None, max_depth: int = 5) -> list:
         if analisys.get("confidence") == "none":
             raise ValueError(f"DEBUG: '{filter['name']}' not found in HTML, evidence: {analisys.get('evidence')}")
 
-        # ti has this problem with disabled inputs with "Filter Input"
-        if "www.ti.com" in url:
-            
-            known_disabled_pattern = "Filter Input"
+        if self._script_targets_disabled(html, analisys.get("target_script"), filter["name"]):
 
-            if analisys.get("target_script") and known_disabled_pattern in analisys.get("target_script"):
-                
-                analisys["target_script"] = None
-                analisys["interaction_type"] = "unknown"
-                analisys["gate_needed"] = True
+            analisys["target_script"] = None
+            analisys["interaction_type"] = "unknown"
+            analisys["gate_needed"] = True
         
         # options already enumerated in the first pass - no reason to resolve them again
         if analisys["gate_script"] and not analisys.get("target_script") and not analisys.get("available_options"):
@@ -309,16 +332,11 @@ class Orchestrator:
                     result["control_type"] = "none"
                     result["needs_more_depth"] = True
 
-                # ti has this problem with disabled inputs with "Filter Input"
-                if "www.ti.com" in url:
-                    
-                    known_disabled_pattern = "Filter Input"
+                if self._script_targets_disabled(data_to_search["html"], result.get("script"), filter["name"]):
 
-                    if result.get("script") and known_disabled_pattern in result.get("script"):
-                        
-                        result["script"] = None
-                        result["control_type"] = "none"
-                        result["needs_more_depth"] = True
+                    result["script"] = None
+                    result["control_type"] = "none"
+                    result["needs_more_depth"] = True
 
                 last_result = result
 
@@ -465,7 +483,7 @@ class Orchestrator:
             # one filter the page doesn't expose shouldn't kill the whole run - the rest
             # of the filters still narrow the results, and the skipped ones are reported
             try:
-                resolved = self.resolve_scripts(url, analisys, filter)
+                resolved = self.resolve_scripts(url, analisys, filter, html)
             except ValueError as error:
                 print(f"WARNING: skipping filter '{name}' - {error}")
                 skipped_filters.append({"name": name, "reason": str(error)})
