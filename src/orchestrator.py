@@ -22,6 +22,11 @@ class Orchestrator:
         self.pdf = PDFDownloader()
         self.unread_pages = 0
 
+    def _debug(self, message: str) -> None:
+        """The resolution dumps are for chasing a problem, not for the person using the tool."""
+        if self.debug:
+            print(message)
+
     def page_sample(self, url: str) -> dict:
         """ Fetches a single/first page from url and asks AI
         what is possible to extract from it. Returns a list of field names
@@ -145,7 +150,7 @@ class Orchestrator:
                 continue
 
             if self._is_disabled_in_html(html, selector):
-                print(f"DEBUG: '{name}' - the script targets a disabled control ({selector}), digging deeper")
+                self._debug(f"DEBUG: '{name}' - the script targets a disabled control ({selector}), digging deeper")
                 return True
 
         return False
@@ -378,12 +383,12 @@ class Orchestrator:
 
                 # find_script gave up (retries exhausted or unusable response) - stop digging
                 if not isinstance(result, dict):
-                    print(f"DEBUG: find_script returned no usable result for '{filter['name']}'")
+                    self._debug(f"DEBUG: find_script returned no usable result for '{filter['name']}'")
                     break
 
                 # a control that is disabled in the HTML we just fetched can't be used
                 if self._is_disabled_in_html(data_to_search["html"], result.get("selector")):
-                    print(f"DEBUG: '{filter['name']}' - resolved control is disabled ({result.get('selector')}), digging deeper")
+                    self._debug(f"DEBUG: '{filter['name']}' - resolved control is disabled ({result.get('selector')}), digging deeper")
                     result["script"] = None
                     result["control_type"] = "none"
                     result["needs_more_depth"] = True
@@ -519,7 +524,7 @@ class Orchestrator:
             filter["search_terms"] = search_terms
 
             analisys = self.search_for_filters(html, search_terms)
-            print(f"DEBUG: analisys for filter '{name}': {analisys}")
+            self._debug(f"DEBUG: analisys for filter '{name}': {analisys}")
 
             if isinstance(analisys, dict):
                 self._drop_invented_selectors(analisys, html, name)
@@ -556,7 +561,7 @@ class Orchestrator:
 
                 if has_category_filter:
                     fallback = self.extractor.find_global_apply_script(html)
-                    print(f"DEBUG: fallback global apply_script search: {fallback}")
+                    self._debug(f"DEBUG: fallback global apply_script search: {fallback}")
 
                     if fallback.get("confidence") != "none" and fallback.get("apply_script"):
                         known_apply_script = fallback["apply_script"]
@@ -577,7 +582,7 @@ class Orchestrator:
         if skipped_filters:
             print(f"WARNING: these filters were NOT applied: {[s['name'] for s in skipped_filters]}")
 
-        print(f"DEBUG: resolved_filters = {resolved_filters}")
+        self._debug(f"DEBUG: resolved_filters = {resolved_filters}")
         #return 0
 
         return {
