@@ -607,8 +607,11 @@ class AIExtractor:
             for w in html_windows
         )
 
-        with open("data/shit/html_windows.html", "w", encoding="utf-8") as f:
-            f.write(combined_windows)
+        if self.debug:
+            Path("data/shit").mkdir(parents=True, exist_ok=True)
+
+            with open("data/shit/html_windows.html", "w", encoding="utf-8") as f:
+                f.write(combined_windows)
         
         if len(combined_windows) > 150000:
             raise ValueError(f"DEBUG: MAYDAY we got a problem with length {len(combined_windows)}")

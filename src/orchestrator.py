@@ -610,6 +610,8 @@ class Orchestrator:
             }
 
         if resolved_pagination.get("confidence") != "none" and resolved_pagination.get("next_button_script"):
+            filename.parent.mkdir(parents=True, exist_ok=True)
+
             with open(filename, "w", encoding="utf-8") as f:
                 f.write(json.dumps(resolved_pagination))
 
@@ -987,6 +989,8 @@ class Orchestrator:
 
         # so we can grep the analysed HTML when a filter "isn't there" - tells apart
         # "not in the fetched HTML" from "in the HTML but the windows missed it"
+        Path("data/shit").mkdir(parents=True, exist_ok=True)
+
         with open("data/shit/html_to_analize.txt", "w", encoding="utf-8") as f:
             f.write(page_sample["html_to_analize"] or "")
         print(f"DEBUG: html_to_analize length: {len(page_sample['html_to_analize'] or '')}\n")
