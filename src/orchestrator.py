@@ -268,6 +268,62 @@ class Orchestrator:
                 print(f"WARNING: option '{value}' was missing from the model's list for '{name}' - rebuilt from the page")
                 analisys["available_options"].append({"value": value, "script": script, "selector": selector})
 
+    def _repair_facet_choice(self, analisys: dict, html: str, name: str, wanted_values: list) -> None:
+        """
+        The HTML windows are picked by search term, so a filter called "Type" also matches the
+        "Component Type" panel and the model can settle on the wrong one. The page says which
+        panel is which: the one whose heading IS the filter name.
+        """
+        options = analisys.get("available_options") or []
+
+        if not html or not wanted_values:
+            return
+
+        listed = {(option.get("value") or "").lower() for option in options}
+        missing = [value for value in wanted_values if value and value.lower() not in listed]
+
+        # the model's panel holds every value we asked for, so there is nothing to argue with
+        if not missing:
+            return
+
+        soup = BeautifulSoup(html, "html.parser")
+        wanted = name.strip().lower()
+        headings = [el for el in soup.find_all(True) if el.get_text(strip=True).lower() == wanted]
+
+        if not headings:
+            return
+
+        for heading in headings:
+            panel = heading.parent
+
+            while panel is not None:
+                found = [el for el in panel.find_all(id=True) if el.get("id", "").startswith("facet-")]
+
+                if found:
+                    break
+
+                panel = panel.parent
+
+            if panel is None:
+                continue
+
+            rebuilt = []
+
+            for value in missing:
+                for element in found:
+                    if element["id"].endswith(value):
+                        rebuilt.append({
+                            "value": value,
+                            "script": "(function() { const el = document.getElementById('" + element["id"] + "'); if (el) { el.click(); } })();",
+                            "selector": None,
+                        })
+                        break
+
+            if rebuilt:
+                print(f"WARNING: the options for '{name}' came from another panel - rebuilt {[o['value'] for o in rebuilt]} from the one labelled '{name}'")
+                analisys["available_options"] = rebuilt
+                return
+
     def _is_disabled_in_html(self, html: str, selector: str | None) -> bool:
         """
         The AI is told to skip disabled twins but breaks that rule now and then, and typing
@@ -468,6 +524,7 @@ class Orchestrator:
             if isinstance(analisys, dict):
                 self._drop_invented_selectors(analisys, html, name)
                 self._complete_missing_options(analisys, html, values, name)
+                self._repair_facet_choice(analisys, html, name, values)
 
             # unusable analysis (empty or wrong shape) - skip instead of crashing downstream
             if not isinstance(analisys, dict) or not analisys:
