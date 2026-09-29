@@ -85,13 +85,29 @@ Interactive test suite with pre-configured sites:
 python src/test_orchestrator.py
 ```
 
-Includes:
-- Texas Instruments (sensors)
-- Analog Devices (parametric search)
-- Vishay (LEDs)
-- Infineon (isolators)
-- KOA Speer (resistors)
-- And more...
+Pick a site by number. Each entry carries its own URL, filters and extraction prompt.
+
+#### What a healthy run looks like
+
+Verified on 2026-09-29, every test green in one sweep:
+
+| # | Site | Records | Notes |
+|---|------|---------|-------|
+| 1 | Texas Instruments - sensors | 14 | 7 requested values; `TMP75` alone returns 6 variants, `ISO` returns the ISOTMP35 family |
+| 2 | Analog Devices - parametric search | 58 | |
+| 3 | Vishay - LEDs SMD | 3 | |
+| 4 | Infineon - digital isolators | 4 | |
+| 5 | KOA Speer | 2 | |
+| 6 | Samtec - multi-filter | 1 | |
+| 7 | Amphenol | 3 | no product table on the page - records come from link tiles and carry no part number |
+| 8 | TE Connectivity - power connectors | 2 | |
+| 9 | Molex1 | 44 | 5 pages of 10, the last one partial - a good check that pagination completes |
+| 10 | Molex2 - multi-filter | 6 | `Component Type: Receptacle`; the same run without that filter returns 10 (6 receptacles + 4 plugs) |
+
+These are live manufacturer catalogs, so the counts can legitimately move when a manufacturer adds
+or retires parts. Treat a mismatch as a reason to read the log, not as proof of a bug - and check
+the warnings first: `the result is incomplete` means the model dropped a page (usually a 503), and
+`these filters were NOT applied` means the run was wider than you asked for.
 
 ### Debug output
 
@@ -230,6 +246,22 @@ often enough to be worth automating:
 | `_confirm_with_enter()` | a synthetic `input` event is not a keystroke - appends keydown/keyup Enter when the script types but never confirms |
 | `_scoped_apply_script()` | Apply buttons come in twins (one per filter panel plus a page-level one) - picks the visible one whose nearest checkbox-bearing ancestor holds the most of them |
 | `_advancing_next_script()` | a next-page control selected by an attribute holding a page number only works once - resolves the current page from the DOM at click time and takes the one after it |
+| `_confirm_with_button()` | a field inside a shadow root is confirmed by the component's own button, which the fetched HTML never shows - finds it in the live page and clicks it, but only when the script types and confirms nothing |
+
+### Repairs on the model's answer
+
+The same idea runs one level up, in `orchestrator.py`: the model proposes, the HTML decides.
+Each of these fires only when the page disagrees with the answer, so a correct answer passes
+through untouched.
+
+| Repair | What it catches |
+|--------|-----------------|
+| `_drop_invented_selectors()` | a selector that matches nothing, or matches several elements - a native click takes the first match, so an ambiguous gate opens the wrong column's menu |
+| `_repair_gate_selector()` | a grid puts the header and its filter button in different rows, so scoping by the header alone hits nothing - rebuilds the selector around the column attribute both rows share |
+| `_complete_missing_options()` | long option lists come back truncated - rebuilds a requested value from the id family its listed twins belong to |
+| `_repair_facet_choice()` | HTML windows are picked by search term, so a filter called `Type` also matches the `Component Type` panel - takes the panel whose heading *is* the filter name |
+| `_script_targets_disabled()` | grids ship one filter input per column and leave them disabled until the menu opens - typing into one fails silently, so it counts as no control at all |
+| `_is_closed_select_option()` | an `<option>` of a plain `<select>` is not natively clickable - falls back to the script |
 
 Where a selector exists, the action is a native `click` rather than a scripted one: AG Grid menus
 and some frameworks ignore `element.click()` from `executeJavascript` but honour a real browser
@@ -451,12 +483,7 @@ The model may occasionally pick a stale or incorrect selector. This is a top qua
 ✗ Date pickers  
 ✗ Complex multi-select patterns
 
-### 6. One site-specific remnant is left in the code
-
-`resolve_scripts()` still special-cases a Texas Instruments label (`"Filter Input"`). It is the
-last hardcoded site detail in the pipeline and is tracked in the roadmap below.
-
-### 7. PDF download depends on site
+### 6. PDF download depends on site
 
 Not all sites provide datasheet URLs. Extraction accuracy varies.
 
@@ -494,23 +521,18 @@ pip list --outdated
    - Some catalog pages aren't table/grid based - product data or datasheet links live in a different structure (card lists, detail-page links)
    - Extraction logic currently assumes a tabular/grid layout; needs a second mode for link-based pages
 
-3. **Remove the last hardcoded site detail**
-   - `resolve_scripts()` still matches a Texas Instruments label (`"Filter Input"`) by name
-   - Everything else in the pipeline is resolved from the page, so this one line is what stops
-     the project from being honestly described as site-agnostic
-
-4. **Treat the page's own search box as a filter**
+3. **Treat the page's own search box as a filter**
    - Nearly every catalog carries a free-text search field, and it often reaches values no facet
      exposes: part fragments, series names, keywords that span several columns
    - The pipeline only resolves declared filter controls, so that field is currently invisible to it
    - Offering it as one more filter would give the user a way through pages whose facets are poor,
      missing, or too coarse - on some sites it is the only control that narrows anything useful
 
-5. **Generalize filter logic**
+4. **Generalize filter logic**
    - Support more filter types
    - Improve selector reliability
 
-6. **Improve pagination**
+5. **Improve pagination**
    - Detect page counts reliably (the model does not always return `filtered_page_count`,
      and the loop then pages blind up to the action/time budget)
    - Support virtualized grids
@@ -526,17 +548,17 @@ pip list --outdated
      guessing. Anyone picking this up should make the check trustworthy first - waiting out the
      refresh before reading it, or requiring two agreeing reads - and only then let it skip cycles.
 
-7. **Harden the AI contract**
+6. **Harden the AI contract**
    - Use Gemini's `response_schema` instead of parsing free-form JSON and retrying on failure
    - Stricter validation of what comes back
    - Clearer retry logic
 
-8. **Add test coverage**
+7. **Add test coverage**
    - Unit tests for helpers
    - Fixture-based tests with sample HTML
    - Regression tests for known patterns
 
-9. **Reduce hardcoded behavior**
+8. **Reduce hardcoded behavior**
    - Move repeated fixes into reusable abstractions
 
 ### Mid priority
@@ -544,13 +566,7 @@ pip list --outdated
 1. **Parallelize PDF downloads**
    - `PDFDownloader` currently downloads sequentially; move to a thread pool (similar to the pattern already used for page processing) for faster datasheet collection
 
-2. **Repair facet choices that match on a substring**
-   - A filter named `Type` can resolve to a `Component Type` facet, because the HTML windows are
-     chosen by search term and one name contains the other
-   - Needs the same treatment `_repair_gate_selector()` already gives ambiguous gate selectors:
-     let the HTML decide, not the model's own label matching
-
-3. **LLM-assisted field matching for user input**
+2. **LLM-assisted field matching for user input**
    - When a user-provided filter field name doesn't cleanly match anything in `available_fields`, have the AI propose the closest match and confirm with the user in a loop, instead of failing outright
 
 ### Low priority
