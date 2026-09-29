@@ -489,7 +489,16 @@ The model may occasionally pick a stale or incorrect selector. This is a top qua
 ✗ Date pickers  
 ✗ Complex multi-select patterns
 
-### 6. PDF download depends on site
+### 6. Two site-specific blocks are left in the code
+
+`resolve_pagination()` and `extract_data()` both special-case `analog.com`. The first replaces the
+model's pagination answer with a fixed script, because that grid is virtualized and its controls
+never appear in the fetched HTML - there is nothing for the model to find. The second computes a
+missing `page_count` from the declared total divided by the records on the page. Everything else in
+the pipeline is resolved from the page, so these two are the only places where the code knows a
+site by name.
+
+### 7. PDF download depends on site
 
 Not all sites provide datasheet URLs. Extraction accuracy varies.
 
@@ -530,11 +539,19 @@ pip list --outdated
    - Offering it as one more filter would give the user a way through pages whose facets are poor,
      missing, or too coarse - on some sites it is the only control that narrows anything useful
 
-3. **Generalize filter logic**
+3. **Remove the two remaining site-specific blocks**
+   - Both are in `orchestrator.py` and both key off `analog.com` (see the limitation above)
+   - The `page_count` fallback looks generic already - total records divided by records on the page
+     is arithmetic, not a site quirk - but dropping the site check also changes *when* pagination
+     starts, so it needs a full sweep of the test suite to land safely
+   - The pagination override is the harder one: it exists because a virtualized grid shows no
+     pagination in the HTML at all. Generalizing it means detecting that case, not naming the site
+
+4. **Generalize filter logic**
    - Support more filter types
    - Improve selector reliability
 
-4. **Improve pagination**
+5. **Improve pagination**
    - Detect page counts reliably (the model does not always return `filtered_page_count`,
      and the loop then pages blind up to the action/time budget)
    - Support virtualized grids
@@ -550,17 +567,17 @@ pip list --outdated
      guessing. Anyone picking this up should make the check trustworthy first - waiting out the
      refresh before reading it, or requiring two agreeing reads - and only then let it skip cycles.
 
-5. **Harden the AI contract**
+6. **Harden the AI contract**
    - Use Gemini's `response_schema` instead of parsing free-form JSON and retrying on failure
    - Stricter validation of what comes back
    - Clearer retry logic
 
-6. **Add test coverage**
+7. **Add test coverage**
    - Unit tests for helpers
    - Fixture-based tests with sample HTML
    - Regression tests for known patterns
 
-7. **Reduce hardcoded behavior**
+8. **Reduce hardcoded behavior**
    - Move repeated fixes into reusable abstractions
 
 ### Mid priority
