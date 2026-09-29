@@ -459,8 +459,14 @@ so a long run silently collects fewer cycles rather than failing the request.
 ### 1. Filtering is not fully general
 
 ✗ Works on many sites, but not all catalog grids  
-✗ Some logic remains site-specific  
-✓ Covers most common filter types (dropdowns, search, checkboxes)
+✓ Covers most common filter types (dropdowns, search, checkboxes)  
+✓ Any number of filters can be combined in one run
+
+**Filter combinations that raise `NotImplementedError`** - any number of filters can be combined,
+but not every shape: two identifier-type filters in one run, two multi-value exclusive filters
+(a dropdown or a radio group, where picking one value replaces the other), or an exclusive filter
+together with a multi-value identifier filter. Each of these turns the number of fetches from a
+sum into a product, so the limit is deliberate rather than accidental.
 
 ### 2. AI selectors aren't deterministic
 
@@ -513,26 +519,22 @@ pip list --outdated
 
 ### High priority
 
-1. **Generalize multi-filter support**
-   - Currently the pipeline is built around a single filter field per run
-   - Needs a flexible architecture that accepts an arbitrary number of filters at once (any combination of fields/values), not just one
-
-2. **Support link-based pages, not only tabular grids**
+1. **Support link-based pages, not only tabular grids**
    - Some catalog pages aren't table/grid based - product data or datasheet links live in a different structure (card lists, detail-page links)
    - Extraction logic currently assumes a tabular/grid layout; needs a second mode for link-based pages
 
-3. **Treat the page's own search box as a filter**
+2. **Treat the page's own search box as a filter**
    - Nearly every catalog carries a free-text search field, and it often reaches values no facet
      exposes: part fragments, series names, keywords that span several columns
    - The pipeline only resolves declared filter controls, so that field is currently invisible to it
    - Offering it as one more filter would give the user a way through pages whose facets are poor,
      missing, or too coarse - on some sites it is the only control that narrows anything useful
 
-4. **Generalize filter logic**
+3. **Generalize filter logic**
    - Support more filter types
    - Improve selector reliability
 
-5. **Improve pagination**
+4. **Improve pagination**
    - Detect page counts reliably (the model does not always return `filtered_page_count`,
      and the loop then pages blind up to the action/time budget)
    - Support virtualized grids
@@ -548,17 +550,17 @@ pip list --outdated
      guessing. Anyone picking this up should make the check trustworthy first - waiting out the
      refresh before reading it, or requiring two agreeing reads - and only then let it skip cycles.
 
-6. **Harden the AI contract**
+5. **Harden the AI contract**
    - Use Gemini's `response_schema` instead of parsing free-form JSON and retrying on failure
    - Stricter validation of what comes back
    - Clearer retry logic
 
-7. **Add test coverage**
+6. **Add test coverage**
    - Unit tests for helpers
    - Fixture-based tests with sample HTML
    - Regression tests for known patterns
 
-8. **Reduce hardcoded behavior**
+7. **Reduce hardcoded behavior**
    - Move repeated fixes into reusable abstractions
 
 ### Mid priority
