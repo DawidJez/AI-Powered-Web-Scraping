@@ -209,9 +209,43 @@ class FirecrawlClient:
 
         return script[:end] + keys + script[end:]
 
+    SUBMIT_IN_COMPONENT = ('button[type="submit"], input[type="submit"], [class*="submit"], '
+                           '[class*="search-button"], [aria-label*="search" i], [aria-label*="submit" i]')
+
+    # a search box keeps its clear and close controls next to the one we want
+    NOT_A_SUBMIT = '[class*="clear"], [class*="reset"], [class*="close"], [aria-label*="clear" i], [aria-label*="close" i]'
+
+    def _confirm_with_button(self, script: str) -> str:
+        """
+        A field inside a shadow root often confirms with its own button, and that button is the one
+        thing neither the fetched HTML nor the model can see - so look for it in the live page.
+        """
+        typed = bool(script) and bool(self.INPUT_EVENT.search(script))
+        confirms = ".click(" in (script or "") or "requestSubmit" in (script or "") or ".submit(" in (script or "")
+
+        # outside a shadow root the model reads the DOM as well as we do
+        if not typed or confirms or ".shadowRoot" not in script:
+            return script
+
+        found = [m.group(2) for m in self.APPLY_SELECTOR.finditer(script)]
+
+        if not found:
+            return script
+
+        component = json.dumps(found[0])
+        wanted = json.dumps(self.SUBMIT_IN_COMPONENT)
+        skip = json.dumps(self.NOT_A_SUBMIT)
+
+        return script + (
+            " (function() { const host = document.querySelector(" + component + "); if (!host) { return; } "
+            "for (const root of [host.shadowRoot, host]) { if (!root) { continue; } "
+            "const button = [...root.querySelectorAll(" + wanted + ")].find(el => !el.matches(" + skip + ")); "
+            "if (button) { button.click(); return; } } })();"
+        )
+
     def _safe_script(self, script: str) -> str:
         """One crashing executeJavascript kills the whole action sequence, so a bad selector becomes a no-op instead."""
-        script = self._confirm_with_enter(self._real_submit(self._use_native_setter(script)))
+        script = self._confirm_with_button(self._confirm_with_enter(self._real_submit(self._use_native_setter(script))))
 
         return "(function() { try { " + script + " } catch (e) { return 'script error: ' + e.message; } })();"
 
