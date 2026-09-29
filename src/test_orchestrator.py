@@ -153,9 +153,9 @@ TEST_CONFIGS = {
             "values": ["2.00mm I/O Connectors"]
         },
         {
-            "name": "Type",
+            "name": "Component Type",
             "hints": [""],
-            "values": ["N/A"]
+            "values": ["Receptacle"]
         },
         {
             "name": "Circuits (Loaded)",

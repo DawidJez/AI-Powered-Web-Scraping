@@ -223,7 +223,7 @@ class FirecrawlClient:
         typed = bool(script) and bool(self.INPUT_EVENT.search(script))
         confirms = ".click(" in (script or "") or "requestSubmit" in (script or "") or ".submit(" in (script or "")
 
-        # outside a shadow root the model reads the DOM as well as we do
+        # outside a shadow root the model reads the DOM as well as we do - leave those scripts alone
         if not typed or confirms or ".shadowRoot" not in script:
             return script
 
@@ -630,11 +630,6 @@ class FirecrawlClient:
 
         self._debug(f"DEBUG pagination: {len(raw_scrapes)} scrapes -> {len(pages)} unique pages")
 
-        # an identical page means the click changed nothing in time - that page is simply lost
-        if len(pages) < len(raw_scrapes):
-            print(f"WARNING: {len(raw_scrapes) - len(pages)} paginated page(s) came back unchanged and were dropped - "
-                  f"the next-page click did not advance, or the grid was still refreshing after {PAGINATION_WAIT_MS}ms")
-
         stop_at = None
         if disabled_check_script:
             js_returns = result.actions.get("javascriptReturns") or []
@@ -662,6 +657,17 @@ class FirecrawlClient:
 
             # diagnostics only - this flag is unreliable mid-refresh, it no longer trims
             self._debug(f"DEBUG pagination: stop_at={stop_at} (diagnostic only, not used for trimming)")
+
+        dropped = len(raw_scrapes) - len(pages)
+
+        # the flag is too shaky to skip the cycles, but it is good enough to tell a dead end
+        # from a failure once the pages are in - one is worth reporting, the other is not
+        if dropped and stop_at == 0:
+            self._debug(f"DEBUG pagination: no page past the first one - {dropped} repeat(s) of it were dropped")
+
+        elif dropped:
+            print(f"WARNING: {dropped} paginated page(s) came back unchanged and were dropped - "
+                  f"the next-page click did not advance, or the grid was still refreshing after {PAGINATION_WAIT_MS}ms")
 
         if self.debug:
             with open("data/debug_pagination_pages.json", "w", encoding="utf-8") as f:

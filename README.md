@@ -514,7 +514,17 @@ pip list --outdated
    - Detect page counts reliably (the model does not always return `filtered_page_count`,
      and the loop then pages blind up to the action/time budget)
    - Support virtualized grids
-   - Stop clicking into a next control that is already exhausted
+   - Stop clicking into a next control that is already exhausted. **Deliberately not done**, and
+     the reason is worth keeping: every action of a scrape is sent to Firecrawl in one batch, so
+     `disabled_check_script` only answers after the whole batch has run - there is no way to react
+     mid-batch. The answer could be fetched earlier, as one extra read-only action on the filtered
+     fetch, which costs nothing. The problem is trusting it: some grids (Molex among them) keep the
+     pagination buttons disabled *while the grid refreshes*, so a check run right after Apply can
+     report "no next page" on a page that has ten. Acting on that would silently drop records,
+     which is the one failure this pipeline is built to make loud. A run against a single-page
+     result currently wastes about 40 seconds on clicks into nothing; that is the price of not
+     guessing. Anyone picking this up should make the check trustworthy first - waiting out the
+     refresh before reading it, or requiring two agreeing reads - and only then let it skip cycles.
 
 7. **Harden the AI contract**
    - Use Gemini's `response_schema` instead of parsing free-form JSON and retrying on failure
