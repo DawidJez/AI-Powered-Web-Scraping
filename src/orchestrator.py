@@ -21,6 +21,7 @@ class Orchestrator:
         self.excel = ExcelExporter()
         self.pdf = PDFDownloader()
         self.unread_pages = 0
+        self.unfiltered_pages = 0
 
     def _debug(self, message: str) -> None:
         """The resolution dumps are for chasing a problem, not for the person using the tool."""
@@ -666,6 +667,7 @@ class Orchestrator:
 
         # pages the model never answered for - counted so a partial result cannot pass as a full one
         self.unread_pages = 0
+        self.unfiltered_pages = 0
         all_results = []
         data = filtered_data.get("filtered_data")
         filters_applied = bool(filtered_data.get("resolved_scripts"))
@@ -675,12 +677,14 @@ class Orchestrator:
             self._count_unread(extracted, "the filtered page")
 
             # still the whole catalog after filtering - the filter never took effect, and
-            # paginating it would scrape the entire site once per value
+            # paginating it would scrape the entire site once per value. one value out of many can
+            # miss, so drop that page instead of losing the values that did work
             if filters_applied and unfiltered_total and extracted.get("total_records_declared") == unfiltered_total:
-                raise ValueError(
-                    f"The filter had no effect - the filtered page still reports {unfiltered_total} records, "
-                    f"same as the unfiltered page. Stopping before scraping the whole catalog."
-                )
+                missed = page_data.get("identifier_value") if isinstance(page_data, dict) else None
+                self.unfiltered_pages += 1
+                print(f"WARNING: the filter had no effect for '{missed or 'one of the values'}' - the page still "
+                      f"reports {unfiltered_total} records, so it is dropped and will not be paginated")
+                continue
 
             all_results.append(extracted.get("records", []))
 
@@ -705,6 +709,14 @@ class Orchestrator:
                     extracted_more = self.extractor.extract(page_html, user_prompt, available_fields)
                     self._count_unread(extracted_more, f"paginated page {number}")
                     all_results.append(extracted_more.get("records", []))
+
+        # not one value got through - that is the whole catalog waiting to be scraped, so stop
+        if filters_applied and self.unfiltered_pages and not all_results:
+            raise ValueError(
+                f"The filter had no effect on any of the {self.unfiltered_pages} value(s) - the filtered page "
+                f"still reports {unfiltered_total} records, same as the unfiltered page. "
+                f"Stopping before scraping the whole catalog."
+            )
 
         return all_results
 
@@ -989,6 +1001,10 @@ class Orchestrator:
             print(f"WARNING: the result is incomplete - {self.unread_pages} page(s) could not be read, "
                   f"their records are missing. Re-run when the model is available again.")
 
+        if self.unfiltered_pages:
+            print(f"WARNING: the result is incomplete - the filter did not take effect for "
+                  f"{self.unfiltered_pages} value(s), so their records are missing.")
+
         print(f"Saved {len(flat_all_results)} records to: {output_path}")
 
         if download_pdfs:
@@ -1000,6 +1016,7 @@ class Orchestrator:
             "output_path": output_path,
             "record_count": len(flat_all_results),
             "unread_pages": self.unread_pages,
+            "unfiltered_pages": self.unfiltered_pages,
             "records": flat_all_results
         }
 
@@ -1082,6 +1099,10 @@ class Orchestrator:
             print(f"WARNING: the result is incomplete - {self.unread_pages} page(s) could not be read, "
                   f"their records are missing. Re-run when the model is available again.\n")
 
+        if self.unfiltered_pages:
+            print(f"WARNING: the result is incomplete - the filter did not take effect for "
+                  f"{self.unfiltered_pages} value(s), so their records are missing.\n")
+
         if not flat_all_results:
             raise ValueError("No records to save - check the filter/field/URL")
 
@@ -1112,5 +1133,6 @@ class Orchestrator:
             "output_path": output_path,
             "record_count": len(flat_all_results),
             "unread_pages": self.unread_pages,
+            "unfiltered_pages": self.unfiltered_pages,
             "records": flat_all_results
         }

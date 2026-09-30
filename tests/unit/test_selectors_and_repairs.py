@@ -205,5 +205,57 @@ class RestoreValuePlaceholder(unittest.TestCase):
         self.assertIsNone(orchestrator()._restore_value_placeholder(None, ["TMP75"]))
 
 
+class FakeExtractor:
+    """extract() is an API call - hand the guard canned pages instead."""
+
+    def __init__(self, pages):
+        self.pages = list(pages)
+        self.tokens_usage = []
+
+    def extract(self, page_data, user_prompt, available_fields):
+        return self.pages.pop(0)
+
+
+def page(total, records):
+    return {"total_records_declared": total, "records": records}
+
+
+def run_extract(pages, values, filters_applied=True, unfiltered_total=397):
+    instance = orchestrator()
+    instance.extractor = FakeExtractor(pages)
+    instance.unread_pages = 0
+    instance.unfiltered_pages = 0
+
+    filtered_data = {
+        "filtered_data": [{"identifier_value": v} for v in values],
+        "resolved_scripts": [{"name": "Product number"}] if filters_applied else [],
+    }
+
+    return instance, instance.extract_data(
+        "https://www.ti.com/sensors", filtered_data, "MPN", unfiltered_total=unfiltered_total
+    )
+
+
+class NoEffectFilterGuard(unittest.TestCase):
+    """One value that does not filter must not take down the values that did."""
+
+    def test_one_bad_page_is_dropped_and_the_rest_survive(self):
+        instance, out = run_extract(
+            [page(6, [{"MPN": "TMP75"}]), page(397, [{"MPN": "x"}]), page(4, [{"MPN": "TMP117"}])],
+            ["TMP75", "ISO", "TMP117"],
+        )
+        self.assertEqual(out, [[{"MPN": "TMP75"}], [{"MPN": "TMP117"}]])
+        self.assertEqual(instance.unfiltered_pages, 1)
+
+    def test_every_page_unfiltered_still_stops_the_run(self):
+        with self.assertRaises(ValueError):
+            run_extract([page(397, [{"MPN": "x"}]), page(397, [{"MPN": "y"}])], ["ISO", "TMP"])
+
+    def test_the_guard_is_off_when_no_filter_was_applied(self):
+        instance, out = run_extract([page(397, [{"MPN": "x"}])], ["ISO"], filters_applied=False)
+        self.assertEqual(out, [[{"MPN": "x"}]])
+        self.assertEqual(instance.unfiltered_pages, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
