@@ -1000,7 +1000,8 @@ class Orchestrator:
             print("No records to save - check the filter/field/values and try again.")
             return
 
-        self.excel.save(flat_all_results, output_path)
+        # save() renames the file when one is already there, so this is the path that really got written
+        output_path = self.excel.save(flat_all_results, output_path)
 
         if self.unread_pages:
             print(f"WARNING: the result is incomplete - {self.unread_pages} page(s) could not be read, "
