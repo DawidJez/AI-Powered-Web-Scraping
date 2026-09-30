@@ -608,9 +608,9 @@ class AIExtractor:
         )
 
         if self.debug:
-            Path("data/shit").mkdir(parents=True, exist_ok=True)
+            Path("data/debug").mkdir(parents=True, exist_ok=True)
 
-            with open("data/shit/html_windows.html", "w", encoding="utf-8") as f:
+            with open("data/debug/html_windows.html", "w", encoding="utf-8") as f:
                 f.write(combined_windows)
         
         if len(combined_windows) > 150000:
