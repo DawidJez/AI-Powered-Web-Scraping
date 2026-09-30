@@ -174,5 +174,36 @@ class DedupeRecords(unittest.TestCase):
         self.assertEqual(len(out), 1)
 
 
+TYPING = ('(function() { const input = document.querySelector("ti-search-field")'
+          '.shadowRoot.querySelector("input"); setter.call(input, %s); })();')
+
+
+class RestoreValuePlaceholder(unittest.TestCase):
+    """The model bakes the first value into the typing script instead of leaving __VALUE__."""
+
+    def test_a_correct_script_is_left_alone(self):
+        script = TYPING % '"__VALUE__"'
+        self.assertEqual(orchestrator()._restore_value_placeholder(script, ["TMP75"]), script)
+
+    def test_baked_value_becomes_the_placeholder(self):
+        out = orchestrator()._restore_value_placeholder(TYPING % '"TMP75"', ["TMP75", "TMP117"])
+        self.assertEqual(out, TYPING % '"__VALUE__"')
+
+    def test_single_quotes_work_too(self):
+        out = orchestrator()._restore_value_placeholder(TYPING % "'TMP75'", ["TMP75"])
+        self.assertEqual(out, TYPING % "'__VALUE__'")
+
+    def test_the_longer_value_wins_over_its_own_prefix(self):
+        out = orchestrator()._restore_value_placeholder(TYPING % '"TMP117"', ["TMP1", "TMP117"])
+        self.assertEqual(out, TYPING % '"__VALUE__"')
+
+    def test_an_unknown_value_is_left_as_written(self):
+        script = TYPING % '"something else"'
+        self.assertEqual(orchestrator()._restore_value_placeholder(script, ["TMP75"]), script)
+
+    def test_no_script_stays_none(self):
+        self.assertIsNone(orchestrator()._restore_value_placeholder(None, ["TMP75"]))
+
+
 if __name__ == "__main__":
     unittest.main()

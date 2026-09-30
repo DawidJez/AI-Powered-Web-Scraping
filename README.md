@@ -362,7 +362,7 @@ no new dependency - plain `unittest` from the standard library.
 python -m unittest discover -s tests/unit -t tests/unit
 ```
 
-56 tests in three files:
+62 tests in three files:
 - `test_script_rewriters.py` - the rewriters that patch the model's JavaScript
   (native value setter, `requestSubmit`, Enter confirm, shadow DOM confirm
   button, scoped apply, advancing next-page click)

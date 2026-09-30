@@ -347,6 +347,27 @@ class Orchestrator:
 
         return all(el.has_attr("disabled") or el.get("aria-disabled") == "true" for el in found)
 
+    def _restore_value_placeholder(self, script: str | None, values: list[str]) -> str | None:
+        """
+        The model is told to leave __VALUE__ in the typing script but bakes the first value in
+        now and then - every value then gets the same filter and the run collapses to one.
+        """
+        if not script or "__VALUE__" in script:
+            return script
+
+        # longest first, so a short value that is a prefix of a longer one does not win
+        for value in sorted(values or [], key=len, reverse=True):
+            for quote in ('"', "'"):
+                baked = quote + value + quote
+
+                if baked in script:
+                    print(f"WARNING: the typing script had '{value}' baked in instead of the placeholder - put it back")
+                    return script.replace(baked, quote + "__VALUE__" + quote)
+
+        print("WARNING: the typing script has no __VALUE__ and none of the requested values - "
+              "it will be sent as the model wrote it")
+        return script
+
     def resolve_scripts(self, url: str, analisys: dict, filter: dict, html: str | None = None, max_depth: int = 5) -> list:
         if analisys.get("confidence") == "none":
             raise ValueError(f"DEBUG: '{filter['name']}' not found in HTML, evidence: {analisys.get('evidence')}")
@@ -432,22 +453,31 @@ class Orchestrator:
             gate_scripts = scripts[:-1] if dropped_last else scripts
             gate_selectors = selectors[:-1] if dropped_last else selectors
 
+            interaction_type = last_result.get("interaction_type") if last_result else "unknown"
+
+            if interaction_type == "type":
+                final_script = self._restore_value_placeholder(final_script, filter.get("values"))
+
             return {
                 "gate_scripts": gate_scripts,
                 "gate_selectors": gate_selectors,
                 "final_script": final_script,
                 "available_options": available_options,
-                "interaction_type": last_result.get("interaction_type") if last_result else "unknown",
+                "interaction_type": interaction_type,
                 "apply_script": result.get("apply_script") if isinstance(result, dict) else None
             }
         
         gate_scripts = [analisys["gate_script"]] if analisys.get("gate_script") else []
         gate_selectors = [analisys.get("gate_selector")] if analisys.get("gate_script") else []
+        target_script = analisys.get("target_script")
+
+        if analisys.get("interaction_type") == "type":
+            target_script = self._restore_value_placeholder(target_script, filter.get("values"))
 
         return {
             "gate_scripts": gate_scripts,
             "gate_selectors": gate_selectors,
-            "final_script": analisys.get("target_script"),
+            "final_script": target_script,
             "available_options": analisys.get("available_options"),
             "interaction_type": analisys.get("interaction_type"),
             "apply_script": analisys.get("apply_script")
