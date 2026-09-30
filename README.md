@@ -323,6 +323,7 @@ src/                      # Main application code
   test_orchestrator.py    # Interactive test suite
 
 tests/
+  unit/                   # Fast offline unit tests, no API keys needed
   manual_tests/           # Development test runners
   older_code/             # Legacy site-specific scrapers (reference only)
 
@@ -351,6 +352,27 @@ Legacy code from earlier project iterations:
 - **Why kept:** Reference material for project evolution
 - **Why not used:** Logic now generalized via `Orchestrator` and AI extraction
 - **Not imported:** These files are not part of the current pipeline
+
+### Unit tests
+
+Fast, offline checks of the tricky pure-logic parts. No API keys, no network,
+no new dependency - plain `unittest` from the standard library.
+
+```bash
+python -m unittest discover -s tests/unit -t tests/unit
+```
+
+56 tests in three files:
+- `test_script_rewriters.py` - the rewriters that patch the model's JavaScript
+  (native value setter, `requestSubmit`, Enter confirm, shadow DOM confirm
+  button, scoped apply, advancing next-page click)
+- `test_selectors_and_repairs.py` - selector parsing, disabled-control
+  detection, the repairs applied to the model's answer, record dedupe
+- `test_limits_and_parsing.py` - HTML window scoring, JSON extraction,
+  backoff, the Gemini per-minute and per-day limiters
+
+They run against the real `src/` modules, so a rewriter or repair that stops
+behaving turns one of them red straight away.
 
 ---
 
