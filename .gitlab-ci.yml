@@ -18,6 +18,7 @@ linux:
   artifacts:
     paths:
       - dist/scraper
+      - .env.example
     expire_in: never
 
   rules:
@@ -37,6 +38,7 @@ windows:
   artifacts:
     paths:
       - dist/scraper.exe
+      - .env.example
     expire_in: never
 
   rules:

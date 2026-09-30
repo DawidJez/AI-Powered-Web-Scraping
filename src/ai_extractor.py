@@ -1160,7 +1160,8 @@ class AIExtractor:
         html_windows = self._extract_html_windows(html, pagination_search_terms)
 
         if not html_windows:
-            return {"script": None, "confidence": "none", "evidence": "text not found in HTML"}
+            return {"next_button_script": None, "disabled_check_script": None,
+                    "confidence": "none", "evidence": "text not found in HTML"}
         
         combined_windows = "\n\n".join(
             f"--- Occurrence {w['occurrence_index']} ---\n{w['fragment']}"

@@ -24,6 +24,7 @@ class FirecrawlClient:
     def __init__(self, api_key: str | None = None, debug: bool = False):
         self.app = FirecrawlApp(api_key=api_key or os.getenv("FIRECRAWL_API_KEY"))
         self.debug = debug
+        self.skipped_pages = 0
 
     def _debug(self, message: str) -> None:
         """Action dumps are for chasing a problem, not for every production run."""
@@ -566,8 +567,14 @@ class FirecrawlClient:
 
         actions.extend(self._apply_action(resolved_filters))
 
-        pagination_script = resolved_pagination["next_button_script"]
-        disabled_check_script = resolved_pagination.get("disabled_check_script")
+        pagination_script = (resolved_pagination or {}).get("next_button_script")
+        disabled_check_script = (resolved_pagination or {}).get("disabled_check_script")
+
+        # the page says there is more, but nothing was resolved to click - say so instead of crashing
+        if not pagination_script:
+            print("WARNING: the page has more than one page of results, but no working next-page control "
+                  "was found - only the first page was collected")
+            return []
 
         MAX_ACTIONS = 50
         SAFETY_MARGIN = 2
@@ -579,7 +586,15 @@ class FirecrawlClient:
 
         spent_wait = wait_for + sum(a.get("milliseconds", 0) for a in actions if a["type"] == "wait")
         wait_budget = MAX_WAIT_MS - spent_wait - PAGINATION_WAIT_MS
-        max_cycles = min(max_cycles, max(0, wait_budget // PAGINATION_WAIT_MS))
+        budgeted_cycles = min(max_cycles, max(0, wait_budget // PAGINATION_WAIT_MS))
+
+        # both budgets are hard limits of one scrape, so the pages past them are simply not collected
+        if page_count and budgeted_cycles < page_count - 1:
+            self.skipped_pages = page_count - 1 - budgeted_cycles
+            print(f"WARNING: only {budgeted_cycles + 1} of {page_count} pages fit in one scrape - "
+                  f"{self.skipped_pages} page(s) were not collected, the result is partial")
+
+        max_cycles = budgeted_cycles
 
         # the first page is already in hand - with nothing left to page through there is nothing to scrape
         if max_cycles == 0:

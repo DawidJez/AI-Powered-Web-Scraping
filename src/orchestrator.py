@@ -605,7 +605,7 @@ class Orchestrator:
                 if cached.get("confidence") != "none" and cached.get("next_button_script"):
                     return cached
 
-        resolved_pagination = self.extractor.resolve_pagination(page_sample, html, url)
+        resolved_pagination = self.extractor.resolve_pagination(page_sample, html, url) or {}
         if "analog.com" in url:
             resolved_pagination = {
                 "next_button_script": '(function() { document.querySelector(\'button[aria-label="Next page"]\').click(); })();',
@@ -716,6 +716,11 @@ class Orchestrator:
                 continue
 
             value = record.get(key)
+
+            # the model returns the identifier as a link often enough, and a dict cannot go into a set
+            if isinstance(value, (dict, list)):
+                value = json.dumps(value, sort_keys=True, ensure_ascii=False)
+
             signature = value if value else json.dumps(record, sort_keys=True, ensure_ascii=False)
 
             if signature in seen:
@@ -908,6 +913,16 @@ class Orchestrator:
         pdf_choice = input("Download PDF datasheets as well? (y/n) [no in default]: ").strip().lower()
         download_pdfs = pdf_choice in ("t", "tak", "y", "yes")
 
+        # the downloader looks the records up by these two fields, so the model has to be asked for
+        # them before it extracts anything - afterwards the prompt is no longer read
+        if download_pdfs and ("Full URL of the PDF datasheet" not in user_prompt or "MPN" not in user_prompt):
+            user_prompt += (
+                "\nRemember to extract these fields:\n"
+                " - Full URL of the PDF datasheet\n"
+                " - MPN\n"
+                "So I can download the PDFs."
+            )
+
         print("\nDownloading data, this may take a moment...\n")
 
         normalized_filters = self.normalize_filters(filters=filters)
@@ -945,14 +960,6 @@ class Orchestrator:
                   f"their records are missing. Re-run when the model is available again.")
 
         print(f"Saved {len(flat_all_results)} records to: {output_path}")
-
-        if download_pdfs and ("Full URL of the PDF datasheet" not in user_prompt or "MPN" not in user_prompt):
-            user_prompt += (
-                "\nRemember to extract these fields:\n"
-                " - Full URL of the PDF datasheet\n"
-                " - MPN\n"
-                "So I can download the PDFs."
-            )
 
         if download_pdfs:
             print("Downloading PDF datasheets...")
