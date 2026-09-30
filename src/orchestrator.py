@@ -952,6 +952,11 @@ class Orchestrator:
         if not output_path:
             output_path = "data/excel/output.xlsx"
 
+        # a typo in the extension makes a file that no spreadsheet app will open
+        if not output_path.lower().endswith((".xlsx", ".xlsm")):
+            output_path = str(Path(output_path).with_suffix(".xlsx"))
+            print(f"The result has to be an .xlsx file, saving as: {output_path}")
+
         pdf_choice = input("Download PDF datasheets as well? (y/n) [no in default]: ").strip().lower()
         download_pdfs = pdf_choice in ("t", "tak", "y", "yes")
 
@@ -1005,12 +1010,14 @@ class Orchestrator:
             print(f"WARNING: the result is incomplete - the filter did not take effect for "
                   f"{self.unfiltered_pages} value(s), so their records are missing.")
 
-        print(f"Saved {len(flat_all_results)} records to: {output_path}")
+        print(f"Saved {len(flat_all_results)} records to: {Path(output_path).resolve()}")
 
         if download_pdfs:
             print("Downloading PDF datasheets...")
-            self.pdf.download_all(flat_all_results, "Full URL of the PDF datasheet", "MPN")
-            print("PDF download completed.")
+            datasheet_dir = Path("data/datasheets")
+            downloaded = self.pdf.download_all(flat_all_results, "Full URL of the PDF datasheet", "MPN", str(datasheet_dir))
+            saved = [entry for entry in downloaded if entry.get("path")]
+            print(f"Downloaded {len(saved)} of {len(downloaded)} datasheets to: {datasheet_dir.resolve()}")
 
         return {
             "output_path": output_path,
